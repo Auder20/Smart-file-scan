@@ -18,3 +18,304 @@
     -fx-background-color: #3B82F6;
     -fx-text-fill: white;
 }
+
+/* Botones primarios y secundarios */
+.primary-btn {
+    -fx-background-color: #3B82F6;
+    -fx-text-fill: white;
+    -fx-font-size: 14;
+    -fx-font-weight: bold;
+    -fx-padding: 10 20;
+    -fx-cursor: hand;
+    -fx-border-radius: 6;
+    -fx-background-radius: 6;
+}
+
+.primary-btn:hover {
+    -fx-background-color: #2563EB;
+}
+
+.secondary-btn {
+    -fx-background-color: #F1F5F9;
+    -fx-text-fill: #475569;
+    -fx-font-size: 14;
+    -fx-padding: 8 16;
+    -fx-cursor: hand;
+    -fx-border-radius: 6;
+    -fx-background-radius: 6;
+    -fx-border-color: #CBD5E1;
+    -fx-border-width: 1;
+}
+
+.secondary-btn:hover {
+    -fx-background-color: #E2E8F0;
+}
+
+.danger-btn {
+    -fx-background-color: #EF4444;
+    -fx-text-fill: white;
+    -fx-font-size: 14;
+    -fx-font-weight: bold;
+    -fx-padding: 10 20;
+    -fx-cursor: hand;
+    -fx-border-radius: 6;
+    -fx-background-radius: 6;
+}
+
+.danger-btn:hover {
+    -fx-background-color: #DC2626;
+}
+
+/* Tarjetas */
+.card {
+    -fx-background-color: white;
+    -fx-background-radius: 8;
+    -fx-border-radius: 8;
+    -fx-border-color: #E2E8F0;
+    -fx-border-width: 1;
+    -fx-padding: 20;
+    -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.1), 5, 0, 0, 2);
+}
+
+/* Progress bar */
+.progress-bar {
+    -fx-accent: #3B82F6;
+    -fx-control-inner-background: #F1F5F9;
+    -fx-progress-color: #3B82F6;
+}
+
+/* Progress bar track */
+.progress-bar .track {
+    -fx-background-color: #F1F5F9;
+    -fx-background-insets: 0;
+    -fx-background-radius: 4;
+}
+
+/* Progress bar bar */
+.progress-bar .bar {
+    -fx-background-color: #3B82F6;
+    -fx-background-insets: 0;
+    -fx-background-radius: 4;
+    -fx-padding: 0.5em;
+}
+
+/* Estadísticas */
+.stats-container {
+    -fx-spacing: 20;
+    -fx-alignment: CENTER;
+}
+
+.stat-card {
+    -fx-background-color: white;
+    -fx-background-radius: 8;
+    -fx-border-color: #E2E8F0;
+    -fx-border-width: 1;
+    -fx-padding: 20 30;
+    -fx-alignment: CENTER;
+    -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.05), 3, 0, 0, 1);
+}
+
+.stat-number {
+    -fx-font-size: 24;
+    -fx-font-weight: bold;
+    -fx-text-fill: #1E293B;
+}
+
+.stat-label {
+    -fx-font-size: 12;
+    -fx-text-fill: #64748B;
+    -fx-font-weight: normal;
+}
+
+/* Tabla de datos */
+.data-table {
+    -fx-background-color: white;
+    -fx-background-radius: 8;
+    -fx-border-color: #E2E8F0;
+    -fx-border-width: 1;
+    -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.05), 3, 0, 0, 1);
+}
+
+.data-table .column-header {
+    -fx-background-color: #F8FAFC;
+    -fx-font-weight: bold;
+    -fx-text-fill: #475569;
+    -fx-border-color: #E2E8F0;
+    -fx-border-width: 0 0 1 0;
+}
+
+.data-table .table-cell {
+    -fx-border-color: #F1F5F9;
+    -fx-border-width: 0 0 1 0;
+    -fx-padding: 8 12;
+}
+
+.data-table .table-row-cell:selected {
+    -fx-background-color: #EFF6FF;
+    -fx-border-color: #3B82F6;
+}
+
+/* Responsive Design */
+.root {
+    -fx-font-size: 14px;
+}
+
+/* Small screens (< 900px) */
+@media (max-width: 900px) {
+    .nav-btn {
+        -fx-font-size: 12;
+        -fx-padding: 8 12;
+    }
+    
+    .stat-card {
+        -fx-padding: 15 20;
+    }
+    
+    .stat-number {
+        -fx-font-size: 20;
+    }
+    
+    .card {
+        -fx-padding: 15;
+    }
+    
+    .data-table {
+        -fx-font-size: 12;
+    }
+    
+    .data-table .table-cell {
+        -fx-padding: 6 8;
+    }
+}
+
+/* Medium screens (900px - 1200px) */
+@media (min-width: 900px) and (max-width: 1200px) {
+    .nav-btn {
+        -fx-font-size: 13;
+        -fx-padding: 10 14;
+    }
+}
+
+/* Large screens (> 1200px) */
+@media (min-width: 1200px) {
+    .nav-btn {
+        -fx-font-size: 15;
+        -fx-padding: 14 18;
+    }
+    
+    .stat-card {
+        -fx-padding: 25 35;
+    }
+    
+    .stat-number {
+        -fx-font-size: 28;
+    }
+    
+    .card {
+        -fx-padding: 25;
+    }
+}
+
+/* Compact mode for very small screens */
+@media (max-width: 800px) {
+    .stats-container {
+        -fx-spacing: 10;
+    }
+    
+    .stat-card {
+        -fx-padding: 10 15;
+    }
+    
+    .stat-number {
+        -fx-font-size: 18;
+    }
+    
+    .stat-label {
+        -fx-font-size: 10;
+    }
+}
+
+/* Scrollbar styling */
+.scroll-bar:vertical {
+    -fx-background-color: #F1F5F9;
+    -fx-background-insets: 0;
+    -fx-pref-width: 12;
+}
+
+.scroll-bar:vertical .track {
+    -fx-background-color: transparent;
+    -fx-border-color: transparent;
+    -fx-background-radius: 0;
+}
+
+.scroll-bar:vertical .thumb {
+    -fx-background-color: #CBD5E1;
+    -fx-background-insets: 2 0 2 0;
+    -fx-background-radius: 4;
+}
+
+.scroll-bar:vertical .thumb:hover {
+    -fx-background-color: #94A3B8;
+}
+
+.scroll-bar:horizontal {
+    -fx-background-color: #F1F5F9;
+    -fx-background-insets: 0;
+    -fx-pref-height: 12;
+}
+
+.scroll-bar:horizontal .track {
+    -fx-background-color: transparent;
+    -fx-border-color: transparent;
+    -fx-background-radius: 0;
+}
+
+.scroll-bar:horizontal .thumb {
+    -fx-background-color: #CBD5E1;
+    -fx-background-insets: 0 2 0 2;
+    -fx-background-radius: 4;
+}
+
+.scroll-bar:horizontal .thumb:hover {
+    -fx-background-color: #94A3B8;
+}
+
+/* Loading animation */
+@keyframes spin {
+    from { -fx-rotate: 0deg; }
+    to { -fx-rotate: 360deg; }
+}
+
+.loading-spinner {
+    -fx-animation: spin 1s linear infinite;
+}
+
+/* Focus styles */
+.button:focused {
+    -fx-border-color: #3B82F6;
+    -fx-border-width: 2;
+}
+
+.text-field:focused {
+    -fx-border-color: #3B82F6;
+    -fx-border-width: 2;
+}
+
+.combo-box:focused {
+    -fx-border-color: #3B82F6;
+    -fx-border-width: 2;
+}
+
+/* Disabled states */
+.button:disabled {
+    -fx-opacity: 0.5;
+    -fx-cursor: default;
+}
+
+.text-field:disabled {
+    -fx-opacity: 0.6;
+}
+
+.combo-box:disabled {
+    -fx-opacity: 0.6;
+}

@@ -7,6 +7,12 @@ services:
       - "8000:8000"
     volumes:
       - ./backend:/app
+      # Montar directorios del host para escaneo
+      - C:\Users:/host/users:ro  # Solo lectura para seguridad
+      - D:\Data:/host/data:ro     # Carpeta de datos personalizada
+      - /host/scans:/app/scans   # Directorio de trabajo para escaneos
+    environment:
+      - HOST_ROOT=/host
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 
   frontend:

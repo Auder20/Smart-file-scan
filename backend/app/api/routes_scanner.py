@@ -74,6 +74,54 @@ def list_scans() -> list[dict]:
     ]
 
 
+@router.get("/all")
+def list_all_scans() -> list[dict]:
+    """Retorna todos los escaneos con información completa incluyendo resultados"""
+    all_scans = []
+    
+    # Escaneos en progreso
+    for sid, progress in _scan_progress.items():
+        scan_info = {
+            "scan_id": sid,
+            "status": progress.status,
+            "files_found": progress.files_found,
+            "progress": progress.progress,
+            "message": progress.message,
+            "root_path": None,
+            "total_files": 0,
+            "total_size": 0,
+            "scanned_at": None,
+            "duration_sec": 0.0
+        }
+        
+        # Si está completado, agregar información del resultado
+        if progress.status == ScanStatus.COMPLETED and sid in _scan_results:
+            result = _scan_results[sid]
+            scan_info.update({
+                "root_path": result.root_path,
+                "total_files": result.total_files,
+                "total_size": result.total_size,
+                "scanned_at": result.scanned_at.isoformat(),
+                "duration_sec": result.duration_sec
+            })
+        
+        all_scans.append(scan_info)
+    
+    return sorted(all_scans, key=lambda x: x.get("scanned_at", ""), reverse=True)
+
+
+@router.delete("/{scan_id}")
+def delete_scan(scan_id: str) -> dict:
+    """Elimina un escaneo completado"""
+    if scan_id in _scan_results:
+        del _scan_results[scan_id]
+    
+    if scan_id in _scan_progress:
+        del _scan_progress[scan_id]
+    
+    return {"message": f"Scan {scan_id} eliminado correctamente"}
+
+
 def _run_scan(scan_id: str, request: ScanRequest) -> None:
     progress        = _scan_progress[scan_id]
     progress.status = ScanStatus.RUNNING

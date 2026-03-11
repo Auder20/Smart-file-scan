@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?import javafx.scene.layout.*?>
+<?import javafx.scene.control.*?>
+<?import javafx.geometry.Insets?>
+
+<VBox xmlns:fx="http://javafx.com/fxml"
+      fx:controller="com.smartfileorganizer.controllers.DashboardController"
+      spacing="20" style="-fx-padding: 30; -fx-background-color: #F8FAFC;">
+
+    <!-- Header -->
+    <HBox spacing="20" alignment="CENTER_LEFT">
+        <Label text="📊 Dashboard Smart File Organizer" 
+               style="-fx-font-size: 24; -fx-font-weight: bold; -fx-text-fill: #1E293B;"/>
+        <Region HBox.hgrow="ALWAYS"/>
+        <Button fx:id="btnRefresh" text="🔄 Actualizar" styleClass="secondary-btn"/>
+        <Button fx:id="btnNewScan" text="🚀 Nuevo Escaneo" styleClass="primary-btn"/>
+    </HBox>
+
+    <!-- Estado del Sistema -->
+    <VBox spacing="10">
+        <Label text="Estado del Sistema" style="-fx-font-size: 16; -fx-font-weight: bold; -fx-text-fill: #334155;"/>
+        <HBox spacing="20" styleClass="stats-container">
+            <VBox spacing="5" styleClass="stat-card">
+                <Label fx:id="lblBackendStatus" text="🔴 Desconectado" styleClass="stat-number"/>
+                <Label text="Backend API" styleClass="stat-label"/>
+            </VBox>
+            <VBox spacing="5" styleClass="stat-card">
+                <Label fx:id="lblTotalScans" text="0" styleClass="stat-number"/>
+                <Label text="Escaneos Totales" styleClass="stat-label"/>
+            </VBox>
+            <VBox spacing="5" styleClass="stat-card">
+                <Label fx:id="lblLastScanTime" text="Nunca" styleClass="stat-number"/>
+                <Label text="Último Escaneo" styleClass="stat-label"/>
+            </VBox>
+            <VBox spacing="5" styleClass="stat-card">
+                <Label fx:id="lblTotalAnalyzed" text="0" styleClass="stat-number"/>
+                <Label text="Archivos Analizados" styleClass="stat-label"/>
+            </VBox>
+        </HBox>
+    </VBox>
+
+    <!-- Escaneos Recientes -->
+    <VBox spacing="10">
+        <HBox spacing="20" alignment="CENTER_LEFT">
+            <Label text="Escaneos Recientes" style="-fx-font-size: 16; -fx-font-weight: bold; -fx-text-fill: #334155;"/>
+            <Region HBox.hgrow="ALWAYS"/>
+            <Button fx:id="btnViewAllScans" text="Ver Todos" styleClass="secondary-btn"/>
+        </HBox>
+        <TableView fx:id="tableRecentScans" prefHeight="200" styleClass="data-table">
+            <columns>
+                <TableColumn fx:id="colRecentScanId" text="ID" prefWidth="80"/>
+                <TableColumn fx:id="colRecentPath" text="Ruta" prefWidth="300"/>
+                <TableColumn fx:id="colRecentStatus" text="Estado" prefWidth="100"/>
+                <TableColumn fx:id="colRecentFiles" text="Archivos" prefWidth="100"/>
+                <TableColumn fx:id="colRecentSize" text="Tamaño" prefWidth="100"/>
+                <TableColumn fx:id="colRecentDate" text="Fecha" prefWidth="120"/>
+                <TableColumn fx:id="colRecentActions" text="Acciones" prefWidth="150"/>
+            </columns>
+        </TableView>
+    </VBox>
+
+    <!-- Métricas Rápidas -->
+    <HBox spacing="20">
+        <!-- Resumen de Espacio -->
+        <VBox spacing="10" HBox.hgrow="ALWAYS">
+            <Label text="Resumen de Espacio" style="-fx-font-size: 16; -fx-font-weight: bold; -fx-text-fill: #334155;"/>
+            <VBox styleClass="card" spacing="15">
+                <HBox spacing="15">
+                    <VBox spacing="5">
+                        <Label text="Espacio Total Analizado" style="-fx-text-fill: #64748B;"/>
+                        <Label fx:id="lblTotalSpace" text="0 GB" style="-fx-font-size: 18; -fx-font-weight: bold; -fx-text-fill: #1E293B;"/>
+                    </VBox>
+                    <VBox spacing="5">
+                        <Label text="Espacio en Duplicados" style="-fx-text-fill: #64748B;"/>
+                        <Label fx:id="lblDuplicateSpace" text="0 GB" style="-fx-font-size: 18; -fx-font-weight: bold; -fx-text-fill: #EF4444;"/>
+                    </VBox>
+                </HBox>
+                <ProgressBar fx:id="spaceUsageBar" prefWidth="Infinity" progress="0" styleClass="progress-bar"/>
+                <Label fx:id="lblSpaceUsage" text="0% del espacio es duplicado" style="-fx-text-fill: #64748B;"/>
+            </VBox>
+        </VBox>
+
+        <!-- Acciones Rápidas -->
+        <VBox spacing="10" prefWidth="300">
+            <Label text="Acciones Rápidas" style="-fx-font-size: 16; -fx-font-weight: bold; -fx-text-fill: #334155;"/>
+            <VBox styleClass="card" spacing="10">
+                <Button fx:id="btnQuickScan" text="🔍 Escanear Carpeta Común" styleClass="secondary-btn" maxWidth="Infinity"/>
+                <Button fx:id="btnFindDuplicates" text="📁 Buscar Duplicados" styleClass="secondary-btn" maxWidth="Infinity"/>
+                <Button fx:id="btnViewStats" text="📈 Ver Estadísticas" styleClass="secondary-btn" maxWidth="Infinity"/>
+                <Button fx:id="btnCleanUp" text="🧹 Limpieza Rápida" styleClass="danger-btn" maxWidth="Infinity"/>
+            </VBox>
+        </VBox>
+    </HBox>
+
+    <!-- Gráficos y Tendencias -->
+    <VBox spacing="10">
+        <Label text="Actividad Reciente" style="-fx-font-size: 16; -fx-font-weight: bold; -fx-text-fill: #334155;"/>
+        <HBox spacing="20">
+            <!-- Gráfico de Escaneos -->
+            <VBox spacing="10" HBox.hgrow="ALWAYS" styleClass="card">
+                <Label text="Escaneos por Día" style="-fx-font-weight: bold; -fx-text-fill: #334155;"/>
+                <VBox fx:id="scanChartContainer" prefHeight="200" alignment="CENTER">
+                    <Label text="📈" style="-fx-font-size: 32; -fx-opacity: 0.3;"/>
+                    <Label text="Gráfico de actividad próximamente..." style="-fx-text-fill: #64748B;"/>
+                </VBox>
+            </VBox>
+
+            <!-- Top Categorías -->
+            <VBox spacing="10" prefWidth="250">
+                <Label text="Categorías Principales" style="-fx-font-weight: bold; -fx-text-fill: #334155;"/>
+                <ListView fx:id="listTopCategories" prefHeight="200"/>
+            </VBox>
+        </HBox>
+    </VBox>
+
+    <!-- Recomendaciones -->
+    <VBox spacing="10">
+        <Label text="Recomendaciones" style="-fx-font-size: 16; -fx-font-weight: bold; -fx-text-fill: #334155;"/>
+        <VBox styleClass="card" spacing="10">
+            <Label fx:id="lblRecommendation1" text="💡 Considera limpiar archivos duplicados para liberar espacio." 
+                   style="-fx-text-fill: #64748B; -fx-wrap-text: true;"/>
+            <Label fx:id="lblRecommendation2" text="📁 Tus carpetas de Documents y Downloads crecen rápidamente." 
+                   style="-fx-text-fill: #64748B; -fx-wrap-text: true;"/>
+            <Label fx:id="lblRecommendation3" text="🔍 Realiza un escaneo completo para obtener análisis detallado." 
+                   style="-fx-text-fill: #64748B; -fx-wrap-text: true;"/>
+        </VBox>
+    </VBox>
+
+    <!-- Barra de Progreso -->
+    <VBox fx:id="progressSection" spacing="10" visible="false" managed="false">
+        <Label text="Actualizando dashboard..." style="-fx-font-size: 16; -fx-font-weight: bold; -fx-text-fill: #334155;"/>
+        <ProgressBar fx:id="progressBar" prefWidth="Infinity" progress="0" styleClass="progress-bar"/>
+        <Label fx:id="lblProgress" text="0%" style="-fx-text-fill: #64748B;"/>
+    </VBox>
+
+</VBox>

@@ -20,7 +20,7 @@ class StatsResponse(BaseModel):
     scan_id:         str
     total_files:     int
     total_size:      int
-    by_category:     list[CategoryStatsResponse]
+    by_category:     list[dict]
     empty_files:     int
     old_files_count: int
     old_files_size:  int
@@ -34,19 +34,21 @@ def get_stats(scan_id: str) -> StatsResponse:
 
     stats = compute_stats(scan_id, result.files)
 
+    # Convertir categorías al formato esperado por el frontend
+    by_category_dict = []
+    for cat in stats.by_category:
+        by_category_dict.append({
+            "category": cat.category.value,
+            "file_count": cat.file_count,
+            "total_size": cat.total_size,
+            "percentage": cat.percentage
+        })
+
     return StatsResponse(
         scan_id         = scan_id,
         total_files     = stats.total_files,
         total_size      = stats.total_size,
-        by_category     = [
-            CategoryStatsResponse(
-                category   = c.category.value,
-                file_count = c.file_count,
-                total_size = c.total_size,
-                percentage = c.percentage,
-            )
-            for c in stats.by_category
-        ],
+        by_category     = by_category_dict,
         empty_files     = stats.empty_files,
         old_files_count = stats.old_files_count,
         old_files_size  = stats.old_files_size,

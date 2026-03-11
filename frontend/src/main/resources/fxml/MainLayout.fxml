@@ -2,39 +2,45 @@
 <?import javafx.scene.layout.*?>
 <?import javafx.scene.control.*?>
 
-<BorderPane xmlns:fx="http://javafx.com/fxml"
+<AnchorPane xmlns:fx="http://javafx.com/fxml"
             fx:controller="com.smartfileorganizer.controllers.MainController"
-            prefWidth="1100" prefHeight="700">
+            prefWidth="1100" prefHeight="700" minWidth="800" minHeight="600">
 
     <!-- SIDEBAR IZQUIERDO -->
-    <left>
-        <VBox styleClass="sidebar" prefWidth="220"
-              style="-fx-background-color: #1E293B; -fx-padding: 20;">
+    <VBox fx:id="sidebar" styleClass="sidebar" prefWidth="220" minWidth="200" maxWidth="300"
+          style="-fx-background-color: #1E293B; -fx-padding: 20;"
+          AnchorPane.topAnchor="0" AnchorPane.bottomAnchor="0" AnchorPane.leftAnchor="0">
 
-            <!-- Logo -->
-            <Label text="⚡ Smart Organizer"
-                   style="-fx-text-fill: white; -fx-font-size: 16; -fx-font-weight: bold; -fx-padding: 0 0 30 0;"/>
+        <!-- Logo -->
+        <Label text="⚡ Smart Organizer"
+               style="-fx-text-fill: white; -fx-font-size: 16; -fx-font-weight: bold; -fx-padding: 0 0 30 0;"/>
 
-            <!-- Botones de navegación -->
-            <Button fx:id="btnDashboard"  text="📊  Dashboard"
-                    maxWidth="Infinity" styleClass="nav-btn"
-                    onAction="#showDashboard"/>
-            <Button fx:id="btnScanner"    text="🔍  Escanear"
-                    maxWidth="Infinity" styleClass="nav-btn"
-                    onAction="#showScanner"/>
-            <Button fx:id="btnDuplicates" text="📁  Duplicados"
-                    maxWidth="Infinity" styleClass="nav-btn"
-                    onAction="#showDuplicates"/>
-            <Button fx:id="btnStats"      text="📈  Estadísticas"
-                    maxWidth="Infinity" styleClass="nav-btn"
-                    onAction="#showStats"/>
-        </VBox>
-    </left>
+        <!-- Botones de navegación -->
+        <Button fx:id="btnDashboard"  text="📊  Dashboard"
+                maxWidth="Infinity" styleClass="nav-btn"
+                onAction="#showDashboard"/>
+        <Button fx:id="btnScanner"    text="🔍  Escanear"
+                maxWidth="Infinity" styleClass="nav-btn"
+                onAction="#showScanner"/>
+        <Button fx:id="btnDuplicates" text="📁  Duplicados"
+                maxWidth="Infinity" styleClass="nav-btn"
+                onAction="#showDuplicates"/>
+        <Button fx:id="btnStats"      text="📈  Estadísticas"
+                maxWidth="Infinity" styleClass="nav-btn"
+                onAction="#showStats"/>
+        
+        <!-- Spacer para empujar contenido hacia abajo -->
+        <Region VBox.vgrow="ALWAYS"/>
+        
+        <!-- Footer info -->
+        <Label text="v1.0.0" 
+               style="-fx-text-fill: #64748B; -fx-font-size: 12; -fx-opacity: 0.7;"/>
+    </VBox>
 
     <!-- CONTENIDO PRINCIPAL -->
-    <center>
-        <StackPane fx:id="contentArea"
-                   style="-fx-background-color: #F8FAFC; -fx-padding: 30;"/>
-    </center>
+    <StackPane fx:id="contentArea"
+               style="-fx-background-color: #F8FAFC; -fx-padding: 30;"
+               AnchorPane.topAnchor="0" AnchorPane.bottomAnchor="0" 
+               AnchorPane.leftAnchor="220" AnchorPane.rightAnchor="0"/>
 
-</BorderPane>
+</AnchorPane>
