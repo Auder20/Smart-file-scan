@@ -1,22 +1,27 @@
 package com.smartfileorganizer;
 
 import javafx.application.Application;
+import javafx.fxml.FXMLLoader;
 import javafx.scene.Scene;
-import javafx.scene.control.Label;
-import javafx.scene.layout.StackPane;
 import javafx.stage.Stage;
 
 public class Main extends Application {
 
     @Override
-    public void start(Stage stage) {
-        Label label = new Label("Smart File Organizer");
+    public void start(Stage stage) throws Exception {
+        FXMLLoader loader = new FXMLLoader(
+            getClass().getResource("/fxml/MainLayout.fxml")
+        );
 
-        StackPane root = new StackPane(label);
-        Scene scene = new Scene(root, 800, 600);
+        Scene scene = new Scene(loader.load());
+        scene.getStylesheets().add(
+            getClass().getResource("/css/styles.css").toExternalForm()
+        );
 
         stage.setTitle("Smart File Organizer");
         stage.setScene(scene);
+        stage.setMinWidth(900);
+        stage.setMinHeight(600);
         stage.show();
     }
 

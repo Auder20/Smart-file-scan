@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?import javafx.scene.layout.*?>
+<?import javafx.scene.control.*?>
+
+<BorderPane xmlns:fx="http://javafx.com/fxml"
+            fx:controller="com.smartfileorganizer.controllers.MainController"
+            prefWidth="1100" prefHeight="700">
+
+    <!-- SIDEBAR IZQUIERDO -->
+    <left>
+        <VBox styleClass="sidebar" prefWidth="220"
+              style="-fx-background-color: #1E293B; -fx-padding: 20;">
+
+            <!-- Logo -->
+            <Label text="⚡ Smart Organizer"
+                   style="-fx-text-fill: white; -fx-font-size: 16; -fx-font-weight: bold; -fx-padding: 0 0 30 0;"/>
+
+            <!-- Botones de navegación -->
+            <Button fx:id="btnDashboard"  text="📊  Dashboard"
+                    maxWidth="Infinity" styleClass="nav-btn"
+                    onAction="#showDashboard"/>
+            <Button fx:id="btnScanner"    text="🔍  Escanear"
+                    maxWidth="Infinity" styleClass="nav-btn"
+                    onAction="#showScanner"/>
+            <Button fx:id="btnDuplicates" text="📁  Duplicados"
+                    maxWidth="Infinity" styleClass="nav-btn"
+                    onAction="#showDuplicates"/>
+            <Button fx:id="btnStats"      text="📈  Estadísticas"
+                    maxWidth="Infinity" styleClass="nav-btn"
+                    onAction="#showStats"/>
+        </VBox>
+    </left>
+
+    <!-- CONTENIDO PRINCIPAL -->
+    <center>
+        <StackPane fx:id="contentArea"
+                   style="-fx-background-color: #F8FAFC; -fx-padding: 30;"/>
+    </center>
+
+</BorderPane>

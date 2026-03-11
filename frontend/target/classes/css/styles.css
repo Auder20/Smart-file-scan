@@ -1,0 +1,20 @@
+.nav-btn {
+    -fx-background-color: transparent;
+    -fx-text-fill: #94A3B8;
+    -fx-font-size: 14;
+    -fx-alignment: CENTER-LEFT;
+    -fx-padding: 12 16;
+    -fx-cursor: hand;
+    -fx-border-radius: 8;
+    -fx-background-radius: 8;
+}
+
+.nav-btn:hover {
+    -fx-background-color: #334155;
+    -fx-text-fill: white;
+}
+
+.nav-btn-active {
+    -fx-background-color: #3B82F6;
+    -fx-text-fill: white;
+}

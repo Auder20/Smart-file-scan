@@ -1,1 +1,2 @@
-com/smartfileorganizer/Main.class
+com\smartfileorganizer\controllers\MainController.class
+com\smartfileorganizer\Main.class
