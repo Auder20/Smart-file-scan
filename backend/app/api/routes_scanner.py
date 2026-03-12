@@ -4,8 +4,12 @@ import uuid
 import logging
 from datetime import datetime
 from threading import Thread
+import asyncio
+import json
+import websockets
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse
 
 from app.models.file_info import ScanRequest, ScanResult, ScanStatus, ScanProgress
 from app.core.scanner import scan_directory
@@ -13,6 +17,9 @@ from app.models.file_info import FileInfo
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/scan", tags=["scanner"])
+
+# WebSocket connections for real-time progress
+_active_connections: list[WebSocket] = []
 
 _scan_results:  dict[str, ScanResult]   = {}
 _scan_progress: dict[str, ScanProgress] = {}
@@ -86,6 +93,34 @@ def get_progress(scan_id: str) -> ScanProgress:
     return p
 
 
+@router.websocket("/ws/scan/{scan_id}")
+async def scan_progress(websocket: WebSocket, scan_id: str):
+    """WebSocket para progreso en tiempo real"""
+    await websocket.accept()
+    _active_connections.append(websocket)
+    
+    try:
+        while True:
+            progress = _scan_progress.get(scan_id)
+            if progress:
+                await websocket.send_text(json.dumps({
+                    "type": "progress",
+                    "scan_id": scan_id,
+                    "progress": progress.progress,
+                    "files_found": progress.files_found,
+                    "message": progress.message,
+                    "current_dir": getattr(progress, 'current_dir', ''),
+                    "parallel_workers": getattr(progress, 'parallel_workers', 0),
+                    "timestamp": datetime.now().isoformat()
+                }))
+            await asyncio.sleep(0.5)  # Actualizar cada 500ms
+    except WebSocketDisconnect:
+        logger.info(f"WebSocket desconectado para scan {scan_id}")
+    finally:
+        if websocket in _active_connections:
+            _active_connections.remove(websocket)
+
+
 @router.get("/{scan_id}")
 def get_result(scan_id: str) -> ScanResult:
     result = _scan_results.get(scan_id)
@@ -112,13 +147,11 @@ def _run_scan(scan_id: str, request: ScanRequest) -> None:
     progress         = _scan_progress[scan_id]
     progress.status  = ScanStatus.RUNNING
     progress.message = "Escaneando..."
-
     files: list[FileInfo] = []
     start = time.time()
-
+    
     try:
         estimated = _estimate_file_count(request.path)
-
         for event in scan_directory(request):
             if isinstance(event, FileInfo):
                 files.append(event)
@@ -127,9 +160,29 @@ def _run_scan(scan_id: str, request: ScanRequest) -> None:
                 progress.message = f"Escaneando… {count:,} archivos encontrados"
                 if estimated > 0:
                     progress.progress = min(int(count * 100 / estimated), 99)
-
+                
+                # Enviar actualización por WebSocket a todos los clientes conectados
+                update_data = {
+                    "type": "progress",
+                    "scan_id": scan_id,
+                    "progress": progress.progress,
+                    "files_found": progress.files_found,
+                    "message": progress.message,
+                    "current_dir": getattr(event, 'path', '').split('/')[-1] if hasattr(event, 'path') else '',
+                    "parallel_workers": getattr(progress, 'parallel_workers', 0),
+                    "timestamp": datetime.now().isoformat()
+                }
+                
+                for ws in _active_connections:
+                    try:
+                        asyncio.create_task(ws.send_text(json.dumps(update_data)))
+                    except:
+                        pass  # Ignorar errores de WebSocket desconectados
+                
+                if count % 100 == 0:  # Enviar cada 100 archivos
+                    yield event
+        
         duration = round(time.time() - start, 2)
-
         _scan_results[scan_id] = ScanResult(
             scan_id      = scan_id,
             root_path    = request.path,
@@ -140,16 +193,45 @@ def _run_scan(scan_id: str, request: ScanRequest) -> None:
             scanned_at   = datetime.now(),
             duration_sec = duration,
         )
-
-        progress.status      = ScanStatus.COMPLETED
+        
+        progress.status  = ScanStatus.COMPLETED
         progress.progress    = 100
-        progress.files_found = len(files)
         progress.message     = f"Completado: {len(files):,} archivos en {duration}s"
-
+        
+        # Enviar actualización final por WebSocket
+        final_update = {
+            "type": "completed",
+            "scan_id": scan_id,
+            "progress": 100,
+            "files_found": len(files),
+            "message": progress.message,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        for ws in _active_connections:
+            try:
+                asyncio.create_task(ws.send_text(json.dumps(final_update)))
+            except:
+                pass
+                
     except Exception as e:
         logger.error("Error en scan %s: %s", scan_id, e, exc_info=True)
         progress.status  = ScanStatus.FAILED
         progress.message = str(e)
+        
+        # Enviar error por WebSocket
+        error_update = {
+            "type": "error",
+            "scan_id": scan_id,
+            "message": progress.message,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        for ws in _active_connections:
+            try:
+                asyncio.create_task(ws.send_text(json.dumps(error_update)))
+            except:
+                pass
 
 
 def _estimate_file_count(path: str) -> int:
