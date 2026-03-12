@@ -8,8 +8,10 @@ services:
     volumes:
       - ./backend:/app
       # Montar directorios del host para escaneo
-      - C:\Users:/host/users:ro  # Solo lectura para seguridad
-      - D:\Data:/host/data:ro     # Carpeta de datos personalizada
+      - C:\:/host/c  # Acceso completo a disco C:
+      - D:\:/host/d  # Acceso completo a disco D:
+      - C:\Users:/host/users  # Mantener compatibilidad con rutas existentes
+      - D:\Data:/host/data     # Mantener compatibilidad con rutas existentes
       - /host/scans:/app/scans   # Directorio de trabajo para escaneos
     environment:
       - HOST_ROOT=/host

@@ -17,6 +17,9 @@ def scan_directory(request: ScanRequest) -> Generator:
     root    = os.path.abspath(request.path)
     exclude = set(d.lower() for d in request.exclude_dirs)
     count   = 0
+    max_files = 10000  # Límite para evitar congelamiento
+    start_time = time.time()
+    timeout = 300     # 5 minutos máximo por escaneo
 
     # Usamos una pila en vez de recursión para evitar
     # RecursionError en directorios muy profundos.
@@ -24,10 +27,21 @@ def scan_directory(request: ScanRequest) -> Generator:
     stack: list[tuple[str, int]] = [(root, 0)]
 
     while stack:
+        # Verificar timeout
+        if time.time() - start_time > timeout:
+            logger.warning(f"Escaneo detenido por timeout en {request.path}")
+            yield {"type": "timeout", "count": count}
+            return
+
         current_dir, depth = stack.pop()
 
         if depth > request.max_depth:
             continue
+
+        if count >= max_files:
+            logger.warning(f"Límite de archivos alcanzado en {request.path}")
+            yield {"type": "limit", "count": count}
+            return
 
         try:
             with os.scandir(current_dir) as entries:

@@ -100,7 +100,6 @@ def explore_folders(
             
             try:
                 is_dir = os.path.isdir(item_path)
-                stat_info = os.stat(item_path)
                 
                 folder_info = FolderInfo(
                     name=item,
@@ -109,7 +108,7 @@ def explore_folders(
                 )
                 
                 if is_dir:
-                    # Contar archivos y calcular tamaño
+                    # Contar archivos y calcular tamaño (con manejo de errores)
                     file_count = 0
                     total_size = 0
                     try:
@@ -128,18 +127,31 @@ def explore_folders(
                                 except (OSError, PermissionError):
                                     continue
                     except (OSError, PermissionError):
+                        logger.debug(f"No se puede explorar completamente {item_path}")
                         pass
                     
                     folder_info.file_count = file_count
                     folder_info.size = total_size
                 else:
-                    folder_info.size = stat_info.st_size
+                    try:
+                        folder_info.size = os.path.getsize(item_path)
+                    except (OSError, PermissionError):
+                        folder_info.size = 0
                 
                 folders.append(folder_info)
                 
             except (OSError, PermissionError) as e:
-                logger.warning(f"Error accediendo a {item_path}: {e}")
-                continue
+                logger.debug(f"Error accediendo a {item_path}: {e}")
+                # Aún así agregar la carpeta con información básica
+                try:
+                    is_dir = os.path.isdir(item_path)
+                    folders.append(FolderInfo(
+                        name=item + " (acceso limitado)",
+                        path=item_path,
+                        is_directory=is_dir
+                    ))
+                except:
+                    continue
                 
     except (OSError, PermissionError) as e:
         raise HTTPException(403, detail=f"No se puede acceder a la ruta: {e}")
@@ -219,33 +231,60 @@ def validate_scan_path(path: str = Query(...)) -> dict:
             "suggestion": "Selecciona una carpeta, no un archivo"
         }
     
-    # Verificar permisos
+    # Verificar permisos de lectura y escritura
+    readable = False
+    writable = False
+    
     try:
+        # Verificar si podemos leer el directorio
+        os.listdir(path)
+        readable = True
+    except PermissionError:
+        return {
+            "valid": False,
+            "reason": "Sin permisos de lectura",
+            "suggestion": "Selecciona una carpeta con permisos de lectura"
+        }
+    
+    try:
+        # Verificar si podemos escribir (solo si es necesario para el escaneo)
         test_file = os.path.join(path, ".access_test")
         with open(test_file, 'w') as f:
             f.write("test")
         os.remove(test_file)
-        
-        # Contar archivos estimados
-        file_count = sum(len(files) for _, _, files in os.walk(path))
-        
-        return {
-            "valid": True,
-            "estimated_files": file_count,
-            "readable": True,
-            "writable": True,
-            "message": "Ruta válida para escaneo"
-        }
-        
+        writable = True
     except PermissionError:
-        return {
-            "valid": False,
-            "reason": "Permisos insuficientes",
-            "suggestion": "Verifica los permisos de la carpeta"
-        }
+        # Algunas carpetas del sistema son de solo lectura, pero aún así se pueden escanear
+        logger.warning(f" Carpeta de solo lectura detectada: {path}")
+        writable = False
     except Exception as e:
-        return {
-            "valid": False,
-            "reason": f"Error desconocido: {str(e)}",
-            "suggestion": "Intenta con otra carpeta"
-        }
+        logger.warning(f"Error verificando escritura en {path}: {e}")
+        writable = False
+    
+    # Si al menos podemos leer, permitir escaneo con advertencia
+    if readable:
+        try:
+            # Contar archivos estimados (con manejo de errores de permisos)
+            file_count = 0
+            for root, dirs, files in os.walk(path):
+                try:
+                    file_count += len(files)
+                except PermissionError:
+                    continue  # Saltar carpetas sin permisos
+            
+            message = "Ruta válida para escaneo" if writable else "Ruta de solo lectura (escaneo limitado)"
+            
+            return {
+                "valid": True,
+                "estimated_files": file_count,
+                "readable": readable,
+                "writable": writable,
+                "message": message,
+                "warning": None if writable else "Algunas funciones pueden estar limitadas en carpetas de solo lectura"
+            }
+        except Exception as e:
+            return {
+                "valid": False,
+                "reason": f"Error analizando la carpeta: {str(e)}",
+                "suggestion": "Intenta con otra carpeta"
+            }
