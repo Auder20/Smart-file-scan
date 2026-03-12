@@ -10,56 +10,71 @@ public class DuplicateFile {
     private long sizeBytes;
     private String modified;
     private boolean isOriginal;
-    private BooleanProperty selected;
+    private final BooleanProperty selected;
 
-    public DuplicateFile(String groupId, String path, String fileName, long sizeBytes, String modified, boolean isOriginal) {
-        this.groupId = groupId;
-        this.path = path;
-        this.fileName = fileName;
-        this.sizeBytes = sizeBytes;
-        this.modified = modified;
+    public DuplicateFile(String groupId, String path, String fileName,
+                         long sizeBytes, String modified, boolean isOriginal) {
+        this.groupId    = groupId;
+        this.path       = path;
+        this.fileName   = fileName;
+        this.sizeBytes  = sizeBytes;
+        this.modified   = modified;
         this.isOriginal = isOriginal;
-        this.selected = new SimpleBooleanProperty(false);
+        this.selected   = new SimpleBooleanProperty(false);
+
+        // Auto-listen to selection changes so the delete button can update
+        this.selected.addListener((obs, o, n) -> {
+            // Listeners will be added externally if needed
+        });
     }
 
-    // Getters
-    public String getGroupId() { return groupId; }
-    public String getPath() { return path; }
-    public String getFileName() { return fileName; }
-    public long getSizeBytes() { return sizeBytes; }
-    public String getModified() { return modified; }
-    public boolean isOriginal() { return isOriginal; }
-    public boolean isSelected() { return selected.get(); }
+    // ── Getters ───────────────────────────────────────────────────────────────
+    public String  getGroupId()    { return groupId; }
+    public String  getPath()       { return path; }
+    public String  getFileName()   { return fileName; }
+    public long    getSizeBytes()  { return sizeBytes; }
+    public String  getModified()   { return modified; }
+    public boolean isOriginal()    { return isOriginal; }
+    public boolean isSelected()    { return selected.get(); }
     public BooleanProperty selectedProperty() { return selected; }
-    public void setSelected(boolean selected) { this.selected.set(selected); }
 
-    // Propiedades calculadas
+    // ── Computed properties ───────────────────────────────────────────────────
+
+    /** Abbreviated hash shown in the Group column */
+    public String getShortGroupId() {
+        return groupId != null && groupId.length() > 8
+            ? groupId.substring(0, 8) + "…"
+            : groupId;
+    }
+
     public String getFormattedSize() {
         return com.smartfileorganizer.utils.FormatUtils.formatFileSize(sizeBytes);
     }
 
     public String getFormattedModified() {
         try {
-            // Formato simple de fecha (asumimos que viene en formato ISO)
-            return modified.substring(0, 10); // YYYY-MM-DD
+            return modified != null && modified.length() >= 10
+                ? modified.substring(0, 10)
+                : modified;
         } catch (Exception e) {
             return modified;
         }
     }
 
     public String getStatus() {
-        return isOriginal ? "Original" : "Duplicado";
+        return isOriginal ? "✅ Original" : "📋 Duplicado";
     }
 
     public String getActions() {
-        return "Eliminar | Abrir";
+        return "Abrir";
     }
 
-    // Setters
-    public void setGroupId(String groupId) { this.groupId = groupId; }
-    public void setPath(String path) { this.path = path; }
-    public void setFileName(String fileName) { this.fileName = fileName; }
-    public void setSizeBytes(long sizeBytes) { this.sizeBytes = sizeBytes; }
-    public void setModified(String modified) { this.modified = modified; }
-    public void setOriginal(boolean original) { isOriginal = original; }
+    // ── Setters ───────────────────────────────────────────────────────────────
+    public void setSelected(boolean v)    { selected.set(v); }
+    public void setGroupId(String v)      { groupId = v; }
+    public void setPath(String v)         { path = v; }
+    public void setFileName(String v)     { fileName = v; }
+    public void setSizeBytes(long v)      { sizeBytes = v; }
+    public void setModified(String v)     { modified = v; }
+    public void setOriginal(boolean v)    { isOriginal = v; }
 }

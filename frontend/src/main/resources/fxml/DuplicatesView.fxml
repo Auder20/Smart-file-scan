@@ -3,97 +3,136 @@
 <?import javafx.scene.control.*?>
 <?import javafx.geometry.Insets?>
 
-<VBox xmlns:fx="http://javafx.com/fxml"
-      fx:controller="com.smartfileorganizer.controllers.DuplicatesController"
-      spacing="20" style="-fx-padding: 30; -fx-background-color: #F8FAFC;">
+<ScrollPane xmlns:fx="http://javafx.com/fxml"
+            fx:controller="com.smartfileorganizer.controllers.DuplicatesController"
+            fitToWidth="true" hbarPolicy="NEVER"
+            style="-fx-background: #1E1E1E; -fx-background-color: #1E1E1E; -fx-border-color: transparent;">
+
+  <VBox spacing="20" style="-fx-padding: 28; -fx-background-color: #1E1E1E;">
 
     <!-- Header -->
-    <HBox spacing="20" alignment="CENTER_LEFT">
-        <Label text="📁 Archivos Duplicados" 
-               style="-fx-font-size: 24; -fx-font-weight: bold; -fx-text-fill: #1E293B;"/>
-        <Region HBox.hgrow="ALWAYS"/>
-        <ComboBox fx:id="comboScanId" prefWidth="150" promptText="Seleccionar escaneo"/>
-        <Button fx:id="btnRefresh" text="🔄 Actualizar" styleClass="secondary-btn"/>
+    <HBox spacing="12" alignment="CENTER_LEFT">
+      <VBox spacing="3">
+        <Label text="Archivos Duplicados"
+               style="-fx-text-fill: #E8E8E8; -fx-font-size: 22px; -fx-font-weight: bold;"/>
+        <Label text="Detecta y elimina archivos duplicados para recuperar espacio"
+               style="-fx-text-fill: #6E6E75; -fx-font-size: 12px;"/>
+      </VBox>
+      <Region HBox.hgrow="ALWAYS"/>
+      <ComboBox fx:id="comboScanId" prefWidth="160"
+                promptText="Seleccionar escaneo…"
+                style="-fx-background-color: #1A1A1A; -fx-border-color: #3E3E42; -fx-border-width: 1; -fx-background-radius: 6; -fx-border-radius: 6;"/>
+      <Button fx:id="btnRefresh" text="🔍  Analizar" styleClass="btn-primary" onAction="#refreshDuplicates"/>
     </HBox>
 
-    <!-- Estadísticas de Duplicados -->
-    <VBox fx:id="statsSection" spacing="10" visible="false" managed="false">
-        <Label text="Resumen de Duplicados" style="-fx-font-size: 16; -fx-font-weight: bold; -fx-text-fill: #334155;"/>
-        <HBox spacing="20" styleClass="stats-container">
-            <VBox spacing="5" styleClass="stat-card">
-                <Label fx:id="lblTotalGroups" text="0" styleClass="stat-number"/>
-                <Label text="Grupos Duplicados" styleClass="stat-label"/>
-            </VBox>
-            <VBox spacing="5" styleClass="stat-card">
-                <Label fx:id="lblTotalDuplicates" text="0" styleClass="stat-number"/>
-                <Label text="Archivos Duplicados" styleClass="stat-label"/>
-            </VBox>
-            <VBox spacing="5" styleClass="stat-card">
-                <Label fx:id="lblSpaceWasted" text="0 MB" styleClass="stat-number"/>
-                <Label text="Espacio Ocupado" styleClass="stat-label"/>
-            </VBox>
-            <VBox spacing="5" styleClass="stat-card">
-                <Label fx:id="lblSpaceRecoverable" text="0 MB" styleClass="stat-number"/>
-                <Label text="Espacio Recuperable" styleClass="stat-label"/>
-            </VBox>
-        </HBox>
-    </VBox>
-
-    <!-- Filtros y Acciones -->
-    <HBox spacing="15" alignment="CENTER_LEFT">
-        <Label text="Filtrar por:" style="-fx-text-fill: #64748B;"/>
-        <TextField fx:id="txtFilter" prefWidth="200" promptText="Buscar por nombre..."/>
-        <ComboBox fx:id="comboSizeFilter" prefWidth="120" promptText="Tamaño"/>
-        <CheckBox fx:id="chkShowOnlyLarge" text="Solo grandes (>10MB)"/>
-        <Region HBox.hgrow="ALWAYS"/>
-        <Button fx:id="btnSelectAll" text="Seleccionar Todo" styleClass="secondary-btn"/>
-        <Button fx:id="btnDeselectAll" text="Deseleccionar" styleClass="secondary-btn"/>
-        <Button fx:id="btnDeleteSelected" text="🗑️ Eliminar Seleccionados" styleClass="danger-btn" disable="true"/>
+    <!-- Stats strip (hidden until loaded) -->
+    <HBox fx:id="statsSection" spacing="12" visible="false" managed="false">
+      <VBox spacing="5" HBox.hgrow="ALWAYS" styleClass="stat-card" style="-fx-border-color: #1A3A5C;">
+        <Label text="GRUPOS" style="-fx-text-fill: #3E6A9E; -fx-font-size: 10px; -fx-font-weight: bold;"/>
+        <Label fx:id="lblTotalGroups" text="0"
+               style="-fx-text-fill: #4B9EFF; -fx-font-size: 28px; -fx-font-weight: bold;"/>
+      </VBox>
+      <VBox spacing="5" HBox.hgrow="ALWAYS" styleClass="stat-card">
+        <Label text="DUPLICADOS" style="-fx-text-fill: #4A4A50; -fx-font-size: 10px; -fx-font-weight: bold;"/>
+        <Label fx:id="lblTotalDuplicates" text="0"
+               style="-fx-text-fill: #E8E8E8; -fx-font-size: 28px; -fx-font-weight: bold;"/>
+      </VBox>
+      <VBox spacing="5" HBox.hgrow="ALWAYS" styleClass="stat-card" style="-fx-border-color: #3A1A1A;">
+        <Label text="ESPACIO MALGASTADO" style="-fx-text-fill: #9E3A3A; -fx-font-size: 10px; -fx-font-weight: bold;"/>
+        <Label fx:id="lblSpaceWasted" text="—"
+               style="-fx-text-fill: #E05555; -fx-font-size: 28px; -fx-font-weight: bold;"/>
+      </VBox>
+      <VBox spacing="5" HBox.hgrow="ALWAYS" styleClass="stat-card" style="-fx-border-color: #1A3A2C;">
+        <Label text="RECUPERABLE" style="-fx-text-fill: #2A5A3C; -fx-font-size: 10px; -fx-font-weight: bold;"/>
+        <Label fx:id="lblSpaceRecoverable" text="—"
+               style="-fx-text-fill: #3FB68E; -fx-font-size: 28px; -fx-font-weight: bold;"/>
+      </VBox>
     </HBox>
 
-    <!-- Tabla de Duplicados -->
-    <TableView fx:id="tableDuplicates" prefHeight="400" styleClass="data-table">
-        <columns>
-            <TableColumn fx:id="colSelect" text="" prefWidth="50"/>
-            <TableColumn fx:id="colGroup" text="Grupo" prefWidth="80"/>
-            <TableColumn fx:id="colFileName" text="Nombre de Archivo" prefWidth="250"/>
-            <TableColumn fx:id="colPath" text="Ruta" prefWidth="300"/>
-            <TableColumn fx:id="colSize" text="Tamaño" prefWidth="100"/>
-            <TableColumn fx:id="colModified" text="Modificado" prefWidth="120"/>
-            <TableColumn fx:id="colStatus" text="Estado" prefWidth="80"/>
-            <TableColumn fx:id="colActions" text="Acciones" prefWidth="150"/>
-        </columns>
+    <!-- Filters + actions bar -->
+    <HBox spacing="10" alignment="CENTER_LEFT"
+          style="-fx-background-color: #252526; -fx-background-radius: 8; -fx-border-color: #2D2D30;
+                 -fx-border-width: 1; -fx-border-radius: 8; -fx-padding: 10 14;">
+      <TextField fx:id="txtFilter" prefWidth="200"
+                 promptText="🔍 Buscar por nombre o ruta…"
+                 style="-fx-background-color: #1A1A1A; -fx-text-fill: #E8E8E8; -fx-prompt-text-fill: #4A4A50;
+                        -fx-background-radius: 6; -fx-border-color: #3E3E42; -fx-border-width: 1;
+                        -fx-border-radius: 6; -fx-padding: 6 10; -fx-font-size: 12px;"/>
+      <ComboBox fx:id="comboSizeFilter" prefWidth="130"
+                style="-fx-background-color: #1A1A1A; -fx-border-color: #3E3E42; -fx-border-width: 1; -fx-background-radius: 6; -fx-border-radius: 6;"/>
+      <CheckBox fx:id="chkShowOnlyLarge" text="Solo grandes (&gt;10MB)"
+                style="-fx-text-fill: #6E6E75; -fx-font-size: 12px;"/>
+      <Region HBox.hgrow="ALWAYS"/>
+      <Button fx:id="btnSelectAll"     text="Selec. duplicados" styleClass="btn-secondary" onAction="#selectAll"/>
+      <Button fx:id="btnDeselectAll"   text="Limpiar selección" styleClass="btn-secondary" onAction="#deselectAll"/>
+      <Button fx:id="btnDeleteSelected" text="🗑  Eliminar seleccionados"
+              styleClass="btn-danger" disable="true" onAction="#deleteSelected"/>
+    </HBox>
+
+    <!-- Main table -->
+    <TableView fx:id="tableDuplicates" prefHeight="380" styleClass="data-table">
+      <columns>
+        <TableColumn fx:id="colSelect"   text=""          prefWidth="42"  minWidth="42"/>
+        <TableColumn fx:id="colGroup"    text="Grupo"     prefWidth="90"  minWidth="70"/>
+        <TableColumn fx:id="colFileName" text="Archivo"   prefWidth="240" minWidth="160"/>
+        <TableColumn fx:id="colPath"     text="Ruta"      prefWidth="320" minWidth="200"/>
+        <TableColumn fx:id="colSize"     text="Tamaño"    prefWidth="90"  minWidth="70"/>
+        <TableColumn fx:id="colModified" text="Fecha"     prefWidth="100" minWidth="80"/>
+        <TableColumn fx:id="colStatus"   text="Estado"    prefWidth="100" minWidth="80"/>
+      </columns>
+      <placeholder>
+        <VBox alignment="CENTER" spacing="8" style="-fx-padding: 40;">
+          <Label text="📁" style="-fx-font-size: 36px; -fx-opacity: 0.3;"/>
+          <Label text="Selecciona un escaneo y presiona Analizar"
+                 style="-fx-text-fill: #4A4A50; -fx-font-size: 13px;"/>
+        </VBox>
+      </placeholder>
     </TableView>
 
-    <!-- Detalles del Grupo Seleccionado -->
-    <VBox fx:id="groupDetailsSection" spacing="10" visible="false" managed="false">
-        <Label text="Detalles del Grupo" style="-fx-font-size: 16; -fx-font-weight: bold; -fx-text-fill: #334155;"/>
-        <GridPane hgap="15" vgap="10" styleClass="card">
-            <Label text="Hash del Grupo:" GridPane.rowIndex="0" GridPane.columnIndex="0" style="-fx-text-fill: #64748B;"/>
-            <Label fx:id="lblGroupHash" GridPane.rowIndex="0" GridPane.columnIndex="1" style="-fx-font-family: monospace; -fx-text-fill: #1E293B;"/>
-            
-            <Label text="Archivos en Grupo:" GridPane.rowIndex="1" GridPane.columnIndex="0" style="-fx-text-fill: #64748B;"/>
-            <Label fx:id="lblGroupFileCount" GridPane.rowIndex="1" GridPane.columnIndex="1" style="-fx-text-fill: #1E293B;"/>
-            
-            <Label text="Tamaño Total:" GridPane.rowIndex="2" GridPane.columnIndex="0" style="-fx-text-fill: #64748B;"/>
-            <Label fx:id="lblGroupTotalSize" GridPane.rowIndex="2" GridPane.columnIndex="1" style="-fx-text-fill: #1E293B;"/>
-            
-            <Label text="Espacio Recuperable:" GridPane.rowIndex="3" GridPane.columnIndex="0" style="-fx-text-fill: #64748B;"/>
-            <Label fx:id="lblGroupWastedSize" GridPane.rowIndex="3" GridPane.columnIndex="1" style="-fx-text-fill: #EF4444; -fx-font-weight: bold;"/>
-            
-            <HBox spacing="10" GridPane.rowIndex="4" GridPane.columnIndex="0" GridPane.columnSpan="2">
-                <Button fx:id="btnKeepOriginal" text="📌 Mantener Original" styleClass="primary-btn"/>
-                <Button fx:id="btnDeleteAllExcept" text="🗑️ Eliminar Resto" styleClass="danger-btn"/>
-                <Button fx:id="btnOpenFolder" text="📁 Abrir Carpeta" styleClass="secondary-btn"/>
-            </HBox>
-        </GridPane>
+    <!-- Group details panel (hidden until row selected) -->
+    <VBox fx:id="groupDetailsSection" spacing="12" visible="false" managed="false"
+          style="-fx-background-color: #252526; -fx-background-radius: 8; -fx-border-color: #3E3E42;
+                 -fx-border-width: 1; -fx-border-radius: 8; -fx-padding: 16;">
+      <Label text="DETALLES DEL GRUPO"
+             style="-fx-text-fill: #4A4A50; -fx-font-size: 10px; -fx-font-weight: bold;"/>
+
+      <GridPane hgap="24" vgap="8">
+        <Label text="Hash:" GridPane.rowIndex="0" GridPane.columnIndex="0"
+               style="-fx-text-fill: #6E6E75; -fx-font-size: 12px;"/>
+        <Label fx:id="lblGroupHash" GridPane.rowIndex="0" GridPane.columnIndex="1"
+               style="-fx-font-family: 'Consolas', monospace; -fx-text-fill: #9A9A9F; -fx-font-size: 12px;"/>
+
+        <Label text="Archivos:" GridPane.rowIndex="1" GridPane.columnIndex="0"
+               style="-fx-text-fill: #6E6E75; -fx-font-size: 12px;"/>
+        <Label fx:id="lblGroupFileCount" GridPane.rowIndex="1" GridPane.columnIndex="1"
+               style="-fx-text-fill: #E8E8E8; -fx-font-size: 12px;"/>
+
+        <Label text="Tamaño total:" GridPane.rowIndex="0" GridPane.columnIndex="2"
+               style="-fx-text-fill: #6E6E75; -fx-font-size: 12px;"/>
+        <Label fx:id="lblGroupTotalSize" GridPane.rowIndex="0" GridPane.columnIndex="3"
+               style="-fx-text-fill: #E8E8E8; -fx-font-size: 12px;"/>
+
+        <Label text="Recuperable:" GridPane.rowIndex="1" GridPane.columnIndex="2"
+               style="-fx-text-fill: #6E6E75; -fx-font-size: 12px;"/>
+        <Label fx:id="lblGroupWastedSize" GridPane.rowIndex="1" GridPane.columnIndex="3"
+               style="-fx-text-fill: #3FB68E; -fx-font-size: 12px; -fx-font-weight: bold;"/>
+      </GridPane>
+
+      <HBox spacing="10">
+        <Button fx:id="btnKeepOriginal"   text="📌  Seleccionar duplicados del grupo" styleClass="btn-secondary" onAction="#keepOriginal"/>
+        <Button fx:id="btnDeleteAllExcept" text="🗑  Eliminar duplicados del grupo"   styleClass="btn-danger"    onAction="#deleteAllExcept"/>
+        <Button fx:id="btnOpenFolder"      text="📂  Abrir carpeta"                   styleClass="btn-secondary" onAction="#openFolder"/>
+      </HBox>
     </VBox>
 
-    <!-- Barra de Progreso -->
-    <VBox fx:id="progressSection" spacing="10" visible="false" managed="false">
-        <Label text="Procesando..." style="-fx-font-size: 16; -fx-font-weight: bold; -fx-text-fill: #334155;"/>
-        <ProgressBar fx:id="progressBar" prefWidth="Infinity" progress="0" styleClass="progress-bar"/>
-        <Label fx:id="lblProgress" text="0%" style="-fx-text-fill: #64748B;"/>
+    <!-- Progress / loading -->
+    <VBox fx:id="progressSection" spacing="8" visible="false" managed="false"
+          style="-fx-background-color: #252526; -fx-background-radius: 8; -fx-border-color: #2D2D30;
+                 -fx-border-width: 1; -fx-border-radius: 8; -fx-padding: 16;">
+      <Label fx:id="lblProgress" text="Analizando…"
+             style="-fx-text-fill: #9A9A9F; -fx-font-size: 12px;"/>
+      <ProgressBar fx:id="progressBar" prefWidth="Infinity" progress="-1"/>
     </VBox>
 
-</VBox>
+  </VBox>
+</ScrollPane>

@@ -4,43 +4,50 @@
 
 <AnchorPane xmlns:fx="http://javafx.com/fxml"
             fx:controller="com.smartfileorganizer.controllers.MainController"
-            prefWidth="1100" prefHeight="700" minWidth="800" minHeight="600">
+            prefWidth="1100" prefHeight="700" minWidth="860" minHeight="580"
+            style="-fx-background-color: #1E1E1E;">
 
-    <!-- SIDEBAR IZQUIERDO -->
-    <VBox fx:id="sidebar" styleClass="sidebar" prefWidth="220" minWidth="200" maxWidth="300"
-          style="-fx-background-color: #1E293B; -fx-padding: 20;"
+    <!-- SIDEBAR -->
+    <VBox fx:id="sidebar" styleClass="sidebar" prefWidth="220"
+          style="-fx-background-color: #141414; -fx-border-color: #2D2D30; -fx-border-width: 0 1 0 0; -fx-padding: 20 12;"
           AnchorPane.topAnchor="0" AnchorPane.bottomAnchor="0" AnchorPane.leftAnchor="0">
 
         <!-- Logo -->
-        <Label text="⚡ Smart Organizer"
-               style="-fx-text-fill: white; -fx-font-size: 16; -fx-font-weight: bold; -fx-padding: 0 0 30 0;"/>
+        <VBox spacing="2" style="-fx-padding: 4 8 24 8;">
+            <Label text="⚡ Smart Organizer"
+                   style="-fx-text-fill: #E8E8E8; -fx-font-size: 15px; -fx-font-weight: bold;"/>
+            <Label text="File Analysis Tool"
+                   style="-fx-text-fill: #3E3E42; -fx-font-size: 10px;"/>
+        </VBox>
 
-        <!-- Botones de navegación -->
-        <Button fx:id="btnDashboard"  text="📊  Dashboard"
-                maxWidth="Infinity" styleClass="nav-btn"
-                onAction="#showDashboard"/>
-        <Button fx:id="btnScanner"    text="🔍  Escanear"
-                maxWidth="Infinity" styleClass="nav-btn"
-                onAction="#showScanner"/>
-        <Button fx:id="btnDuplicates" text="📁  Duplicados"
-                maxWidth="Infinity" styleClass="nav-btn"
-                onAction="#showDuplicates"/>
-        <Button fx:id="btnStats"      text="📈  Estadísticas"
-                maxWidth="Infinity" styleClass="nav-btn"
-                onAction="#showStats"/>
-        
-        <!-- Spacer para empujar contenido hacia abajo -->
+        <!-- Section label -->
+        <Label text="NAVIGATION"
+               style="-fx-text-fill: #3E3E42; -fx-font-size: 10px; -fx-font-weight: bold; -fx-padding: 0 8 8 8;"/>
+
+        <!-- Nav buttons -->
+        <Button fx:id="btnDashboard"  text="📊   Dashboard"
+                maxWidth="Infinity" styleClass="nav-btn" onAction="#showDashboard"/>
+        <Button fx:id="btnScanner"    text="🔍   Escanear"
+                maxWidth="Infinity" styleClass="nav-btn" onAction="#showScanner"/>
+        <Button fx:id="btnDuplicates" text="📁   Duplicados"
+                maxWidth="Infinity" styleClass="nav-btn" onAction="#showDuplicates"/>
+        <Button fx:id="btnStats"      text="📈   Estadísticas"
+                maxWidth="Infinity" styleClass="nav-btn" onAction="#showStats"/>
+
         <Region VBox.vgrow="ALWAYS"/>
-        
-        <!-- Footer info -->
-        <Label text="v1.0.0" 
-               style="-fx-text-fill: #64748B; -fx-font-size: 12; -fx-opacity: 0.7;"/>
+
+        <!-- Footer -->
+        <VBox spacing="4" style="-fx-padding: 8;">
+            <Separator style="-fx-opacity: 0.3;"/>
+            <Label text="v1.0.0  •  Smart File Organizer"
+                   style="-fx-text-fill: #3E3E42; -fx-font-size: 10px; -fx-padding: 4 0 0 0;"/>
+        </VBox>
     </VBox>
 
-    <!-- CONTENIDO PRINCIPAL -->
+    <!-- CONTENT -->
     <StackPane fx:id="contentArea"
-               style="-fx-background-color: #F8FAFC; -fx-padding: 30;"
-               AnchorPane.topAnchor="0" AnchorPane.bottomAnchor="0" 
+               style="-fx-background-color: #1E1E1E;"
+               AnchorPane.topAnchor="0" AnchorPane.bottomAnchor="0"
                AnchorPane.leftAnchor="220" AnchorPane.rightAnchor="0"/>
 
 </AnchorPane>

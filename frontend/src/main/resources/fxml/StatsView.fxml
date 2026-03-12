@@ -3,123 +3,172 @@
 <?import javafx.scene.control.*?>
 <?import javafx.geometry.Insets?>
 
-<VBox xmlns:fx="http://javafx.com/fxml"
-      fx:controller="com.smartfileorganizer.controllers.StatsController"
-      spacing="20" style="-fx-padding: 30; -fx-background-color: #F8FAFC;">
+<ScrollPane xmlns:fx="http://javafx.com/fxml"
+            fx:controller="com.smartfileorganizer.controllers.StatsController"
+            fitToWidth="true" hbarPolicy="NEVER"
+            style="-fx-background: #1E1E1E; -fx-background-color: #1E1E1E; -fx-border-color: transparent;">
+
+  <VBox spacing="20" style="-fx-padding: 28; -fx-background-color: #1E1E1E;">
 
     <!-- Header -->
-    <HBox spacing="20" alignment="CENTER_LEFT">
-        <Label text="📈 Estadísticas de Archivos" 
-               style="-fx-font-size: 24; -fx-font-weight: bold; -fx-text-fill: #1E293B;"/>
-        <Region HBox.hgrow="ALWAYS"/>
-        <ComboBox fx:id="comboScanId" prefWidth="150" promptText="Seleccionar escaneo"/>
-        <Button fx:id="btnRefresh" text="🔄 Actualizar" styleClass="secondary-btn"/>
-        <Button fx:id="btnExport" text="💾 Exportar" styleClass="secondary-btn"/>
+    <HBox spacing="12" alignment="CENTER_LEFT">
+      <VBox spacing="3">
+        <Label text="Estadisticas"
+               style="-fx-text-fill: #E8E8E8; -fx-font-size: 22px; -fx-font-weight: bold;"/>
+        <Label text="Distribucion de archivos por categoria, tamano y extension"
+               style="-fx-text-fill: #6E6E75; -fx-font-size: 12px;"/>
+      </VBox>
+      <Region HBox.hgrow="ALWAYS"/>
+      <ComboBox fx:id="comboScanId" prefWidth="160" promptText="Seleccionar escaneo..."
+                style="-fx-background-color: #1A1A1A; -fx-border-color: #3E3E42; -fx-border-width: 1; -fx-background-radius: 6; -fx-border-radius: 6;"/>
+      <Button fx:id="btnRefresh" text="Cargar" styleClass="btn-primary" onAction="#refreshStats"/>
+      <Button fx:id="btnExport"  text="Exportar" styleClass="btn-secondary" onAction="#exportStats"/>
     </HBox>
 
-    <!-- Estadísticas Generales -->
+    <!-- General stat cards -->
     <VBox fx:id="generalStatsSection" spacing="10" visible="false" managed="false">
-        <Label text="Resumen General" style="-fx-font-size: 16; -fx-font-weight: bold; -fx-text-fill: #334155;"/>
-        <HBox spacing="20" styleClass="stats-container">
-            <VBox spacing="5" styleClass="stat-card">
-                <Label fx:id="lblTotalFiles" text="0" styleClass="stat-number"/>
-                <Label text="Archivos Totales" styleClass="stat-label"/>
-            </VBox>
-            <VBox spacing="5" styleClass="stat-card">
-                <Label fx:id="lblTotalSize" text="0 MB" styleClass="stat-number"/>
-                <Label text="Tamaño Total" styleClass="stat-label"/>
-            </VBox>
-            <VBox spacing="5" styleClass="stat-card">
-                <Label fx:id="lblEmptyFiles" text="0" styleClass="stat-number"/>
-                <Label text="Archivos Vacíos" styleClass="stat-label"/>
-            </VBox>
-            <VBox spacing="5" styleClass="stat-card">
-                <Label fx:id="lblOldFiles" text="0" styleClass="stat-number"/>
-                <Label text="Archivos Viejos" styleClass="stat-label"/>
-            </VBox>
-        </HBox>
+      <HBox spacing="12">
+        <VBox spacing="5" HBox.hgrow="ALWAYS" styleClass="stat-card" style="-fx-border-color: #1A3A5C;">
+          <Label text="ARCHIVOS TOTALES" style="-fx-text-fill: #3E6A9E; -fx-font-size: 10px; -fx-font-weight: bold;"/>
+          <Label fx:id="lblTotalFiles" text="0"
+                 style="-fx-text-fill: #4B9EFF; -fx-font-size: 26px; -fx-font-weight: bold;"/>
+        </VBox>
+        <VBox spacing="5" HBox.hgrow="ALWAYS" styleClass="stat-card" style="-fx-border-color: #1A3A2C;">
+          <Label text="TAMANO TOTAL" style="-fx-text-fill: #2A5A3C; -fx-font-size: 10px; -fx-font-weight: bold;"/>
+          <Label fx:id="lblTotalSize" text="-"
+                 style="-fx-text-fill: #3FB68E; -fx-font-size: 26px; -fx-font-weight: bold;"/>
+        </VBox>
+        <VBox spacing="5" HBox.hgrow="ALWAYS" styleClass="stat-card" style="-fx-border-color: #3A2F1A;">
+          <Label text="ARCHIVOS VACIOS" style="-fx-text-fill: #6E5A30; -fx-font-size: 10px; -fx-font-weight: bold;"/>
+          <Label fx:id="lblEmptyFiles" text="0"
+                 style="-fx-text-fill: #F0A83A; -fx-font-size: 26px; -fx-font-weight: bold;"/>
+        </VBox>
+        <VBox spacing="5" HBox.hgrow="ALWAYS" styleClass="stat-card">
+          <Label text="ARCHIVOS VIEJOS (+1 ANO)" style="-fx-text-fill: #4A4A50; -fx-font-size: 10px; -fx-font-weight: bold;"/>
+          <Label fx:id="lblOldFiles" text="0"
+                 style="-fx-text-fill: #9A9A9F; -fx-font-size: 26px; -fx-font-weight: bold;"/>
+        </VBox>
+      </HBox>
     </VBox>
 
-    <!-- Gráficos y Categorías -->
-    <HBox spacing="20">
-        <!-- Gráfico de Categorías -->
-        <VBox spacing="10" HBox.hgrow="ALWAYS">
-            <Label text="Distribución por Categoría" style="-fx-font-size: 16; -fx-font-weight: bold; -fx-text-fill: #334155;"/>
-            <VBox fx:id="chartContainer" styleClass="card" prefHeight="300" alignment="CENTER">
-                <Label text="📊 Gráfico de categorías" style="-fx-font-size: 48; -fx-opacity: 0.3;"/>
-                <Label text="Gráfico próximamente..." style="-fx-text-fill: #64748B;"/>
-            </VBox>
-        </VBox>
+    <!-- Chart + category table side by side -->
+    <HBox spacing="14">
 
-        <!-- Tabla de Categorías -->
-        <VBox spacing="10" prefWidth="400">
-            <Label text="Detalle por Categoría" style="-fx-font-size: 16; -fx-font-weight: bold; -fx-text-fill: #334155;"/>
-            <TableView fx:id="tableCategories" prefHeight="300" styleClass="data-table">
-                <columns>
-                    <TableColumn fx:id="colCategory" text="Categoría" prefWidth="120"/>
-                    <TableColumn fx:id="colFileCount" text="Archivos" prefWidth="80"/>
-                    <TableColumn fx:id="colCategorySize" text="Tamaño" prefWidth="100"/>
-                    <TableColumn fx:id="colPercentage" text="%" prefWidth="60"/>
-                </columns>
-            </TableView>
+      <!-- PieChart -->
+      <VBox spacing="10" HBox.hgrow="ALWAYS">
+        <Label text="DISTRIBUCION POR CATEGORIA"
+               style="-fx-text-fill: #4A4A50; -fx-font-size: 10px; -fx-font-weight: bold;"/>
+        <VBox fx:id="chartContainer" styleClass="card-flat" prefHeight="320" alignment="CENTER"
+              style="-fx-background-color: #1E1E1E;">
+          <Label text="[chart]" style="-fx-font-size: 40px; -fx-opacity: 0.2;"/>
+          <Label text="Carga un escaneo para ver el grafico"
+                 style="-fx-text-fill: #4A4A50; -fx-font-size: 12px;"/>
         </VBox>
+      </VBox>
+
+      <!-- Category table -->
+      <VBox spacing="10" prefWidth="360">
+        <Label text="DETALLE POR CATEGORIA"
+               style="-fx-text-fill: #4A4A50; -fx-font-size: 10px; -fx-font-weight: bold;"/>
+        <TableView fx:id="tableCategories" prefHeight="320" styleClass="data-table">
+          <columns>
+            <TableColumn fx:id="colCategory"    text="Categoria" prefWidth="110"/>
+            <TableColumn fx:id="colFileCount"   text="Archivos"  prefWidth="80"/>
+            <TableColumn fx:id="colCategorySize" text="Tamano"   prefWidth="90"/>
+            <TableColumn fx:id="colPercentage"  text="\%"         prefWidth="60"/>
+          </columns>
+          <placeholder>
+            <Label text="Sin datos" style="-fx-text-fill: #4A4A50; -fx-font-size: 12px;"/>
+          </placeholder>
+        </TableView>
+      </VBox>
+
     </HBox>
 
-    <!-- Archivos Más Grandes -->
+    <!-- Largest files -->
     <VBox spacing="10">
-        <HBox spacing="20" alignment="CENTER_LEFT">
-            <Label text="Archivos Más Grandes" style="-fx-font-size: 16; -fx-font-weight: bold; -fx-text-fill: #334155;"/>
-            <Region HBox.hgrow="ALWAYS"/>
-            <ComboBox fx:id="comboTopCount" prefWidth="100" value="10"/>
-        </HBox>
-        <TableView fx:id="tableLargestFiles" prefHeight="250" styleClass="data-table">
-            <columns>
-                <TableColumn fx:id="colRank" text="#" prefWidth="40"/>
-                <TableColumn fx:id="colLargeFileName" text="Nombre" prefWidth="300"/>
-                <TableColumn fx:id="colLargeFilePath" text="Ruta" prefWidth="400"/>
-                <TableColumn fx:id="colLargeFileSize" text="Tamaño" prefWidth="100"/>
-                <TableColumn fx:id="colLargeFileModified" text="Modificado" prefWidth="120"/>
-                <TableColumn fx:id="colLargeFileActions" text="Acciones" prefWidth="100"/>
-            </columns>
-        </TableView>
+      <HBox alignment="CENTER_LEFT" spacing="12">
+        <Label text="ARCHIVOS MAS GRANDES"
+               style="-fx-text-fill: #4A4A50; -fx-font-size: 10px; -fx-font-weight: bold;"/>
+        <Region HBox.hgrow="ALWAYS"/>
+        <Label text="Top:" style="-fx-text-fill: #6E6E75; -fx-font-size: 12px;"/>
+        <ComboBox fx:id="comboTopCount" prefWidth="80"
+                  style="-fx-background-color: #1A1A1A; -fx-border-color: #3E3E42; -fx-border-width: 1; -fx-background-radius: 6; -fx-border-radius: 6;"/>
+      </HBox>
+      <TableView fx:id="tableLargestFiles" prefHeight="240" styleClass="data-table">
+        <columns>
+          <TableColumn fx:id="colRank"              text="#"          prefWidth="40"/>
+          <TableColumn fx:id="colLargeFileName"     text="Nombre"     prefWidth="260"/>
+          <TableColumn fx:id="colLargeFilePath"     text="Ruta"       prefWidth="340"/>
+          <TableColumn fx:id="colLargeFileSize"     text="Tamano"     prefWidth="90"/>
+          <TableColumn fx:id="colLargeFileModified" text="Modificado" prefWidth="110"/>
+        </columns>
+        <placeholder>
+          <Label text="Sin datos" style="-fx-text-fill: #4A4A50; -fx-font-size: 12px;"/>
+        </placeholder>
+      </TableView>
     </VBox>
 
-    <!-- Análisis Adicional -->
-    <VBox spacing="10">
-        <Label text="Análisis Adicional" style="-fx-font-size: 16; -fx-font-weight: bold; -fx-text-fill: #334155;"/>
-        <GridPane hgap="20" vgap="15">
-            <!-- Extensiones más comunes -->
-            <VBox spacing="5" GridPane.rowIndex="0" GridPane.columnIndex="0" styleClass="card">
-                <Label text="Extensiones Más Comunes" style="-fx-font-weight: bold; -fx-text-fill: #334155;"/>
-                <ListView fx:id="listExtensions" prefHeight="150"/>
+    <!-- Additional: extensions + space stats -->
+    <HBox spacing="14">
+
+      <!-- Extensions -->
+      <VBox spacing="10" HBox.hgrow="ALWAYS">
+        <Label text="EXTENSIONES MAS COMUNES"
+               style="-fx-text-fill: #4A4A50; -fx-font-size: 10px; -fx-font-weight: bold;"/>
+        <ListView fx:id="listExtensions" prefHeight="200"/>
+      </VBox>
+
+      <!-- Extra stats -->
+      <VBox spacing="10" prefWidth="300">
+        <Label text="METRICAS ADICIONALES"
+               style="-fx-text-fill: #4A4A50; -fx-font-size: 10px; -fx-font-weight: bold;"/>
+        <VBox spacing="12" styleClass="card-flat">
+
+          <HBox spacing="0">
+            <VBox spacing="3" HBox.hgrow="ALWAYS">
+              <Label text="Espacio archivos viejos"
+                     style="-fx-text-fill: #6E6E75; -fx-font-size: 11px;"/>
+              <Label fx:id="lblOldFilesSize" text="-"
+                     style="-fx-text-fill: #E8E8E8; -fx-font-size: 16px; -fx-font-weight: bold;"/>
             </VBox>
+          </HBox>
 
-            <!-- Directorios más grandes -->
-            <VBox spacing="5" GridPane.rowIndex="0" GridPane.columnIndex="1" styleClass="card">
-                <Label text="Estadísticas de Espacio" style="-fx-font-weight: bold; -fx-text-fill: #334155;"/>
-                <VBox spacing="8">
-                    <HBox spacing="10">
-                        <Label text="Espacio por archivos viejos:" style="-fx-text-fill: #64748B;"/>
-                        <Label fx:id="lblOldFilesSize" text="0 MB" style="-fx-font-weight: bold; -fx-text-fill: #1E293B;"/>
-                    </HBox>
-                    <HBox spacing="10">
-                        <Label text="Promedio por archivo:" style="-fx-text-fill: #64748B;"/>
-                        <Label fx:id="lblAvgFileSize" text="0 KB" style="-fx-font-weight: bold; -fx-text-fill: #1E293B;"/>
-                    </HBox>
-                    <HBox spacing="10">
-                        <Label text="Archivos por categoría:" style="-fx-text-fill: #64748B;"/>
-                        <Label fx:id="lblFilesPerCategory" text="0" style="-fx-font-weight: bold; -fx-text-fill: #1E293B;"/>
-                    </HBox>
-                </VBox>
+          <Separator style="-fx-opacity: 0.3;"/>
+
+          <HBox spacing="0">
+            <VBox spacing="3" HBox.hgrow="ALWAYS">
+              <Label text="Promedio por archivo"
+                     style="-fx-text-fill: #6E6E75; -fx-font-size: 11px;"/>
+              <Label fx:id="lblAvgFileSize" text="-"
+                     style="-fx-text-fill: #E8E8E8; -fx-font-size: 16px; -fx-font-weight: bold;"/>
             </VBox>
-        </GridPane>
+          </HBox>
+
+          <Separator style="-fx-opacity: 0.3;"/>
+
+          <HBox spacing="0">
+            <VBox spacing="3" HBox.hgrow="ALWAYS">
+              <Label text="Categorias encontradas"
+                     style="-fx-text-fill: #6E6E75; -fx-font-size: 11px;"/>
+              <Label fx:id="lblFilesPerCategory" text="-"
+                     style="-fx-text-fill: #E8E8E8; -fx-font-size: 16px; -fx-font-weight: bold;"/>
+            </VBox>
+          </HBox>
+
+        </VBox>
+      </VBox>
+
+    </HBox>
+
+    <!-- Progress -->
+    <VBox fx:id="progressSection" spacing="8" visible="false" managed="false"
+          style="-fx-background-color: #252526; -fx-background-radius: 8; -fx-border-color: #2D2D30;
+                 -fx-border-width: 1; -fx-border-radius: 8; -fx-padding: 16;">
+      <Label fx:id="lblProgress" text="Cargando estadisticas..."
+             style="-fx-text-fill: #9A9A9F; -fx-font-size: 12px;"/>
+      <ProgressBar fx:id="progressBar" prefWidth="Infinity" progress="-1"/>
     </VBox>
 
-    <!-- Barra de Progreso -->
-    <VBox fx:id="progressSection" spacing="10" visible="false" managed="false">
-        <Label text="Analizando estadísticas..." style="-fx-font-size: 16; -fx-font-weight: bold; -fx-text-fill: #334155;"/>
-        <ProgressBar fx:id="progressBar" prefWidth="Infinity" progress="0" styleClass="progress-bar"/>
-        <Label fx:id="lblProgress" text="0%" style="-fx-text-fill: #64748B;"/>
-    </VBox>
-
-</VBox>
+  </VBox>
+</ScrollPane>

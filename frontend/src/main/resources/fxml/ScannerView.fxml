@@ -3,102 +3,133 @@
 <?import javafx.scene.control.*?>
 <?import javafx.geometry.Insets?>
 
-<VBox xmlns:fx="http://javafx.com/fxml"
-      fx:controller="com.smartfileorganizer.controllers.ScannerController"
-      spacing="20" style="-fx-padding: 30; -fx-background-color: #F8FAFC;">
+<ScrollPane xmlns:fx="http://javafx.com/fxml"
+            fx:controller="com.smartfileorganizer.controllers.ScannerController"
+            fitToWidth="true" hbarPolicy="NEVER"
+            style="-fx-background: #1E1E1E; -fx-background-color: #1E1E1E; -fx-border-color: transparent;">
+
+  <VBox spacing="20" style="-fx-padding: 28; -fx-background-color: #1E1E1E;">
 
     <!-- Header -->
-    <HBox spacing="20" alignment="CENTER_LEFT">
-        <Label text="🔍 Escaneo de Archivos" 
-               style="-fx-font-size: 24; -fx-font-weight: bold; -fx-text-fill: #1E293B;"/>
-        <Region HBox.hgrow="ALWAYS"/>
-        <Button fx:id="btnRefresh" text="🔄 Actualizar" styleClass="secondary-btn"/>
+    <HBox spacing="12" alignment="CENTER_LEFT">
+      <VBox spacing="3">
+        <Label text="Escanear Archivos"
+               style="-fx-text-fill: #E8E8E8; -fx-font-size: 22px; -fx-font-weight: bold;"/>
+        <Label text="Analiza carpetas para encontrar duplicados y estadísticas"
+               style="-fx-text-fill: #6E6E75; -fx-font-size: 12px;"/>
+      </VBox>
+      <Region HBox.hgrow="ALWAYS"/>
+      <Button fx:id="btnRefresh" text="↻  Historial" styleClass="btn-secondary" onAction="#refreshScans"/>
     </HBox>
 
-    <!-- Selección de Carpeta -->
-    <VBox spacing="10" styleClass="card">
-        <Label text="Seleccionar Carpeta" style="-fx-font-size: 16; -fx-font-weight: bold; -fx-text-fill: #334155;"/>
-        <HBox spacing="10" alignment="CENTER_LEFT">
-            <TextField fx:id="txtFolderPath" prefWidth="400" promptText="Ruta de la carpeta a escanear..."
-                       style="-fx-font-size: 14;"/>
-            <Button fx:id="btnBrowse" text="📁 Examinar" styleClass="primary-btn"/>
+    <!-- Scan config card -->
+    <VBox spacing="14" styleClass="card">
+      <Label text="CONFIGURACIÓN DE ESCANEO"
+             style="-fx-text-fill: #4A4A50; -fx-font-size: 10px; -fx-font-weight: bold;"/>
+
+      <!-- Path row -->
+      <HBox spacing="10" alignment="CENTER_LEFT">
+        <TextField fx:id="txtFolderPath" HBox.hgrow="ALWAYS"
+                   promptText="Ruta de la carpeta a escanear…"
+                   style="-fx-background-color: #1A1A1A; -fx-text-fill: #E8E8E8;
+                          -fx-prompt-text-fill: #4A4A50; -fx-background-radius: 6;
+                          -fx-border-color: #3E3E42; -fx-border-width: 1; -fx-border-radius: 6;
+                          -fx-padding: 9 12; -fx-font-size: 13px;
+                          -fx-font-family: 'Consolas', 'Courier New', monospace;"/>
+        <Button fx:id="btnBrowse" text="📁  Examinar" styleClass="btn-secondary" onAction="#browseFolder"/>
+      </HBox>
+
+      <!-- Options row -->
+      <HBox spacing="24" alignment="CENTER_LEFT">
+        <HBox spacing="8" alignment="CENTER_LEFT">
+          <Label text="Profundidad máx.:" style="-fx-text-fill: #6E6E75; -fx-font-size: 12px;"/>
+          <Spinner fx:id="spinnerMaxDepth" prefWidth="80"
+                   style="-fx-background-color: #1A1A1A; -fx-border-color: #3E3E42; -fx-border-width: 1; -fx-background-radius: 6; -fx-border-radius: 6;"/>
         </HBox>
-        
-        <!-- Opciones de escaneo -->
-        <GridPane hgap="15" vgap="10">
-            <Label text="Profundidad máxima:" GridPane.rowIndex="0" GridPane.columnIndex="0"
-                   style="-fx-text-fill: #64748B;"/>
-            <Spinner fx:id="spinnerMaxDepth" min="1" max="50" initialValue="20" 
-                    GridPane.rowIndex="0" GridPane.columnIndex="1" prefWidth="100"/>
-            
-            <CheckBox fx:id="chkIncludeHidden" text="Incluir archivos ocultos" 
-                     GridPane.rowIndex="1" GridPane.columnIndex="0" GridPane.columnSpan="2"
-                     style="-fx-text-fill: #64748B;"/>
-        </GridPane>
-        
-        <HBox spacing="10">
-            <Button fx:id="btnStartScan" text="🚀 Iniciar Escaneo" styleClass="primary-btn" 
-                    disable="true" prefWidth="150"/>
-            <Button fx:id="btnStopScan" text="⏹️ Detener" styleClass="danger-btn" 
-                    disable="true" prefWidth="100"/>
-            <Region HBox.hgrow="ALWAYS"/>
-            <Label fx:id="lblStatus" text="Listo" style="-fx-text-fill: #64748B;"/>
-        </HBox>
+        <CheckBox fx:id="chkIncludeHidden" text="Incluir archivos ocultos"
+                  style="-fx-text-fill: #6E6E75; -fx-font-size: 12px;"/>
+      </HBox>
+
+      <!-- Action row -->
+      <HBox spacing="10" alignment="CENTER_LEFT">
+        <Button fx:id="btnStartScan" text="▶  Iniciar Escaneo" styleClass="btn-primary"
+                disable="true" prefWidth="160" onAction="#startScan"/>
+        <Button fx:id="btnStopScan"  text="■  Detener" styleClass="btn-danger"
+                disable="true" prefWidth="100" onAction="#stopScan"/>
+        <Region HBox.hgrow="ALWAYS"/>
+        <Label fx:id="lblStatus" text="Listo"
+               style="-fx-text-fill: #4A4A50; -fx-font-size: 12px;"/>
+      </HBox>
     </VBox>
 
-    <!-- Progreso -->
-    <VBox fx:id="progressSection" spacing="10" visible="false" managed="false">
-        <Label text="Progreso del Escaneo" style="-fx-font-size: 16; -fx-font-weight: bold; -fx-text-fill: #334155;"/>
-        <ProgressBar fx:id="progressBar" prefWidth="Infinity" progress="0" styleClass="progress-bar"/>
-        <HBox spacing="20">
-            <Label fx:id="lblProgress" text="0%" style="-fx-text-fill: #64748B;"/>
-            <Label fx:id="lblFilesFound" text="0 archivos encontrados" style="-fx-text-fill: #64748B;"/>
-            <Label fx:id="lblCurrentDir" text="" style="-fx-text-fill: #64748B;"/>
-        </HBox>
+    <!-- Progress -->
+    <VBox fx:id="progressSection" spacing="10" visible="false" managed="false"
+          style="-fx-background-color: #252526; -fx-background-radius: 8; -fx-border-color: #1A3A5C; -fx-border-width: 1; -fx-border-radius: 8; -fx-padding: 16;">
+      <HBox spacing="12" alignment="CENTER_LEFT">
+        <Label text="Escaneando…" style="-fx-text-fill: #4B9EFF; -fx-font-size: 12px; -fx-font-weight: bold;"/>
+        <Region HBox.hgrow="ALWAYS"/>
+        <Label fx:id="lblProgress" text="0%" style="-fx-text-fill: #4B9EFF; -fx-font-size: 12px; -fx-font-weight: bold;"/>
+      </HBox>
+      <ProgressBar fx:id="progressBar" prefWidth="Infinity" progress="0"/>
+      <HBox spacing="20">
+        <Label fx:id="lblFilesFound" text="0 archivos encontrados" style="-fx-text-fill: #6E6E75; -fx-font-size: 11px;"/>
+        <Label fx:id="lblCurrentDir" text="" style="-fx-text-fill: #4A4A50; -fx-font-size: 11px; -fx-font-family: 'Consolas', monospace;"/>
+      </HBox>
     </VBox>
 
-    <!-- Resultados -->
-    <VBox fx:id="resultsSection" spacing="10" visible="false" managed="false">
-        <HBox spacing="20" alignment="CENTER_LEFT">
-            <Label text="Resultados" style="-fx-font-size: 16; -fx-font-weight: bold; -fx-text-fill: #334155;"/>
-            <Region HBox.hgrow="ALWAYS"/>
-            <Button fx:id="btnViewFiles" text="📋 Ver Archivos" styleClass="secondary-btn"/>
-            <Button fx:id="btnExport" text="💾 Exportar" styleClass="secondary-btn"/>
-        </HBox>
-        
-        <!-- Estadísticas rápidas -->
-        <HBox spacing="20" styleClass="stats-container">
-            <VBox spacing="5" styleClass="stat-card">
-                <Label fx:id="lblTotalFiles" text="0" styleClass="stat-number"/>
-                <Label text="Archivos Totales" styleClass="stat-label"/>
-            </VBox>
-            <VBox spacing="5" styleClass="stat-card">
-                <Label fx:id="lblTotalSize" text="0 MB" styleClass="stat-number"/>
-                <Label text="Tamaño Total" styleClass="stat-label"/>
-            </VBox>
-            <VBox spacing="5" styleClass="stat-card">
-                <Label fx:id="lblScanTime" text="0s" styleClass="stat-number"/>
-                <Label text="Duración" styleClass="stat-label"/>
-            </VBox>
-            <VBox spacing="5" styleClass="stat-card">
-                <Label fx:id="lblScanId" text="" styleClass="stat-number"/>
-                <Label text="ID de Escaneo" styleClass="stat-label"/>
-            </VBox>
-        </HBox>
+    <!-- Results -->
+    <VBox fx:id="resultsSection" spacing="12" visible="false" managed="false">
+      <HBox spacing="12" alignment="CENTER_LEFT">
+        <Label text="RESULTADO DEL ESCANEO"
+               style="-fx-text-fill: #4A4A50; -fx-font-size: 10px; -fx-font-weight: bold;"/>
+        <Region HBox.hgrow="ALWAYS"/>
+        <Button fx:id="btnViewFiles" text="Ver archivos" styleClass="btn-secondary" onAction="#viewFiles"/>
+        <Button fx:id="btnExport"    text="Exportar"     styleClass="btn-secondary" onAction="#exportResults"/>
+      </HBox>
+
+      <HBox spacing="12">
+        <VBox spacing="5" HBox.hgrow="ALWAYS" styleClass="stat-card" style="-fx-border-color: #1A3A5C;">
+          <Label text="ARCHIVOS" style="-fx-text-fill: #3E6A9E; -fx-font-size: 10px; -fx-font-weight: bold;"/>
+          <Label fx:id="lblTotalFiles" text="0"
+                 style="-fx-text-fill: #4B9EFF; -fx-font-size: 28px; -fx-font-weight: bold;"/>
+        </VBox>
+        <VBox spacing="5" HBox.hgrow="ALWAYS" styleClass="stat-card" style="-fx-border-color: #1A3A2C;">
+          <Label text="TAMAÑO TOTAL" style="-fx-text-fill: #2A5A3C; -fx-font-size: 10px; -fx-font-weight: bold;"/>
+          <Label fx:id="lblTotalSize" text="—"
+                 style="-fx-text-fill: #3FB68E; -fx-font-size: 28px; -fx-font-weight: bold;"/>
+        </VBox>
+        <VBox spacing="5" HBox.hgrow="ALWAYS" styleClass="stat-card">
+          <Label text="DURACIÓN" style="-fx-text-fill: #4A4A50; -fx-font-size: 10px; -fx-font-weight: bold;"/>
+          <Label fx:id="lblScanTime" text="—"
+                 style="-fx-text-fill: #E8E8E8; -fx-font-size: 28px; -fx-font-weight: bold;"/>
+        </VBox>
+        <VBox spacing="5" HBox.hgrow="ALWAYS" styleClass="stat-card">
+          <Label text="SCAN ID" style="-fx-text-fill: #4A4A50; -fx-font-size: 10px; -fx-font-weight: bold;"/>
+          <Label fx:id="lblScanId" text="—"
+                 style="-fx-text-fill: #6E6E75; -fx-font-size: 16px; -fx-font-weight: bold;
+                        -fx-font-family: 'Consolas', monospace;"/>
+        </VBox>
+      </HBox>
     </VBox>
 
-    <!-- Lista de Escaneos Previos -->
+    <!-- Scan history -->
     <VBox spacing="10">
-        <Label text="Escaneos Previos" style="-fx-font-size: 16; -fx-font-weight: bold; -fx-text-fill: #334155;"/>
-        <TableView fx:id="tableScans" prefHeight="200" styleClass="data-table">
-            <columns>
-                <TableColumn fx:id="colScanId" text="ID" prefWidth="80"/>
-                <TableColumn fx:id="colStatus" text="Estado" prefWidth="100"/>
-                <TableColumn fx:id="colFiles" text="Archivos" prefWidth="100"/>
-                <TableColumn fx:id="colDate" text="Fecha" prefWidth="150"/>
-                <TableColumn fx:id="colActions" text="Acciones" prefWidth="150"/>
-            </columns>
-        </TableView>
+      <Label text="HISTORIAL DE ESCANEOS"
+             style="-fx-text-fill: #4A4A50; -fx-font-size: 10px; -fx-font-weight: bold;"/>
+      <TableView fx:id="tableScans" prefHeight="200" styleClass="data-table">
+        <columns>
+          <TableColumn fx:id="colScanId" text="ID"       prefWidth="80"/>
+          <TableColumn fx:id="colStatus" text="Estado"   prefWidth="110"/>
+          <TableColumn fx:id="colFiles"  text="Archivos" prefWidth="100"/>
+          <TableColumn fx:id="colDate"   text="Fecha"    prefWidth="160"/>
+          <TableColumn fx:id="colActions" text="Acciones" prefWidth="100"/>
+        </columns>
+        <placeholder>
+          <Label text="No hay escaneos en esta sesión."
+                 style="-fx-text-fill: #4A4A50; -fx-font-size: 12px;"/>
+        </placeholder>
+      </TableView>
     </VBox>
 
-</VBox>
+  </VBox>
+</ScrollPane>

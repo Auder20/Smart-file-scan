@@ -1,59 +1,65 @@
 package com.smartfileorganizer.controllers;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import javafx.application.Platform;
+import javafx.collections.FXCollections;
+import javafx.collections.ObservableList;
+import javafx.collections.transformation.FilteredList;
+import javafx.collections.transformation.SortedList;
 import javafx.fxml.FXML;
 import javafx.fxml.Initializable;
 import javafx.scene.control.*;
 import javafx.scene.control.cell.CheckBoxTableCell;
 import javafx.scene.control.cell.PropertyValueFactory;
-import javafx.collections.FXCollections;
-import javafx.collections.ObservableList;
-import javafx.collections.transformation.FilteredList;
-import javafx.collections.transformation.SortedList;
-import javafx.application.Platform;
+import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 
 import java.net.URL;
-import java.util.ResourceBundle;
-import java.util.List;
-import java.util.Map;
-import java.util.HashMap;
+import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
 import com.smartfileorganizer.api.ApiClient;
-import com.smartfileorganizer.models.DuplicateGroup;
 import com.smartfileorganizer.models.DuplicateFile;
+import com.smartfileorganizer.models.DuplicateGroup;
 import com.smartfileorganizer.utils.FormatUtils;
 import com.smartfileorganizer.utils.UIUtils;
 
 public class DuplicatesController implements Initializable {
 
+    // ── Header ────────────────────────────────────────────────────────────────
     @FXML private ComboBox<String> comboScanId;
-    @FXML private Button btnRefresh;
-    
-    @FXML private VBox statsSection;
+    @FXML private Button           btnRefresh;
+
+    // ── Stats ─────────────────────────────────────────────────────────────────
+    @FXML private HBox  statsSection;
     @FXML private Label lblTotalGroups;
     @FXML private Label lblTotalDuplicates;
     @FXML private Label lblSpaceWasted;
     @FXML private Label lblSpaceRecoverable;
-    
-    @FXML private TextField txtFilter;
+
+    // ── Filters + actions ─────────────────────────────────────────────────────
+    @FXML private TextField        txtFilter;
     @FXML private ComboBox<String> comboSizeFilter;
-    @FXML private CheckBox chkShowOnlyLarge;
-    @FXML private Button btnSelectAll;
-    @FXML private Button btnDeselectAll;
-    @FXML private Button btnDeleteSelected;
-    
-    @FXML private TableView<DuplicateFile> tableDuplicates;
+    @FXML private CheckBox         chkShowOnlyLarge;
+    @FXML private Button           btnSelectAll;
+    @FXML private Button           btnDeselectAll;
+    @FXML private Button           btnDeleteSelected;
+
+    // ── Table ─────────────────────────────────────────────────────────────────
+    @FXML private TableView<DuplicateFile>           tableDuplicates;
     @FXML private TableColumn<DuplicateFile, Boolean> colSelect;
-    @FXML private TableColumn<DuplicateFile, String> colGroup;
-    @FXML private TableColumn<DuplicateFile, String> colFileName;
-    @FXML private TableColumn<DuplicateFile, String> colPath;
-    @FXML private TableColumn<DuplicateFile, String> colSize;
-    @FXML private TableColumn<DuplicateFile, String> colModified;
-    @FXML private TableColumn<DuplicateFile, String> colStatus;
-    @FXML private TableColumn<DuplicateFile, String> colActions;
-    
-    @FXML private VBox groupDetailsSection;
+    @FXML private TableColumn<DuplicateFile, String>  colGroup;
+    @FXML private TableColumn<DuplicateFile, String>  colFileName;
+    @FXML private TableColumn<DuplicateFile, String>  colPath;
+    @FXML private TableColumn<DuplicateFile, String>  colSize;
+    @FXML private TableColumn<DuplicateFile, String>  colModified;
+    @FXML private TableColumn<DuplicateFile, String>  colStatus;
+
+    // ── Group details ─────────────────────────────────────────────────────────
+    @FXML private VBox  groupDetailsSection;
     @FXML private Label lblGroupHash;
     @FXML private Label lblGroupFileCount;
     @FXML private Label lblGroupTotalSize;
@@ -61,356 +67,383 @@ public class DuplicatesController implements Initializable {
     @FXML private Button btnKeepOriginal;
     @FXML private Button btnDeleteAllExcept;
     @FXML private Button btnOpenFolder;
-    
-    @FXML private VBox progressSection;
+
+    // ── Progress ──────────────────────────────────────────────────────────────
+    @FXML private VBox        progressSection;
     @FXML private ProgressBar progressBar;
-    @FXML private Label lblProgress;
+    @FXML private Label       lblProgress;
 
     private ApiClient apiClient;
     private final ObservableList<DuplicateFile> duplicateList = FXCollections.observableArrayList();
-    private final ObservableList<String> scanList = FXCollections.observableArrayList();
-    private FilteredList<DuplicateFile> filteredDuplicates;
-    private Map<String, DuplicateGroup> groupMap = new HashMap<>();
+    private final ObservableList<String>        scanList      = FXCollections.observableArrayList();
+    private FilteredList<DuplicateFile>         filteredDuplicates;
+    private final Map<String, DuplicateGroup>   groupMap      = new HashMap<>();
+
+    // Currently selected group hash (for group-level actions)
+    private String selectedGroupHash = null;
 
     @Override
     public void initialize(URL url, ResourceBundle rb) {
         apiClient = new ApiClient();
-        
-        // Configurar tabla
         setupTable();
-        
-        // Configurar filtros
         setupFilters();
-        
-        // Cargar escaneos disponibles
         loadAvailableScans();
     }
 
+    // ── Table setup ───────────────────────────────────────────────────────────
+
     private void setupTable() {
-        // Configurar columnas
         colSelect.setCellValueFactory(new PropertyValueFactory<>("selected"));
-        colGroup.setCellValueFactory(new PropertyValueFactory<>("groupId"));
+        colSelect.setCellFactory(CheckBoxTableCell.forTableColumn(colSelect));
+        colSelect.setEditable(true);
+
+        colGroup.setCellValueFactory(new PropertyValueFactory<>("shortGroupId"));
         colFileName.setCellValueFactory(new PropertyValueFactory<>("fileName"));
         colPath.setCellValueFactory(new PropertyValueFactory<>("path"));
         colSize.setCellValueFactory(new PropertyValueFactory<>("formattedSize"));
         colModified.setCellValueFactory(new PropertyValueFactory<>("formattedModified"));
         colStatus.setCellValueFactory(new PropertyValueFactory<>("status"));
-        colActions.setCellValueFactory(new PropertyValueFactory<>("actions"));
 
-        // Checkbox para selección
-        colSelect.setCellFactory(CheckBoxTableCell.forTableColumn(colSelect));
-        colSelect.setEditable(true);
         tableDuplicates.setEditable(true);
 
-        // Filtros
         filteredDuplicates = new FilteredList<>(duplicateList, p -> true);
-        SortedList<DuplicateFile> sortedDuplicates = new SortedList<>(filteredDuplicates);
-        sortedDuplicates.comparatorProperty().bind(tableDuplicates.comparatorProperty());
-        tableDuplicates.setItems(sortedDuplicates);
+        SortedList<DuplicateFile> sorted = new SortedList<>(filteredDuplicates);
+        sorted.comparatorProperty().bind(tableDuplicates.comparatorProperty());
+        tableDuplicates.setItems(sorted);
 
-        // Listener para selección
+        // Selection listener → show group details
         tableDuplicates.getSelectionModel().selectedItemProperty().addListener(
-            (obs, oldVal, newVal) -> showGroupDetails(newVal)
+            (obs, oldVal, newVal) -> {
+                if (newVal != null) {
+                    selectedGroupHash = newVal.getGroupId();
+                    showGroupDetails(newVal);
+                }
+            }
         );
     }
 
+    // ── Filters ───────────────────────────────────────────────────────────────
+
     private void setupFilters() {
-        // Opciones de filtro por tamaño
         comboSizeFilter.setItems(FXCollections.observableArrayList(
-            "Todos", "< 1MB", "1-10MB", "10-100MB", "> 100MB"
+            "Todos", "< 1 MB", "1–10 MB", "10–100 MB", "> 100 MB"
         ));
         comboSizeFilter.getSelectionModel().selectFirst();
 
-        // Listener para filtro de texto
-        txtFilter.textProperty().addListener((obs, oldVal, newVal) -> applyFilters());
-        
-        // Listener para filtro por tamaño
-        comboSizeFilter.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, newVal) -> applyFilters());
-        
-        // Listener para checkbox de archivos grandes
-        chkShowOnlyLarge.selectedProperty().addListener((obs, oldVal, newVal) -> applyFilters());
+        txtFilter.textProperty().addListener((obs, o, n) -> applyFilters());
+        comboSizeFilter.getSelectionModel().selectedItemProperty().addListener((obs, o, n) -> applyFilters());
+        chkShowOnlyLarge.selectedProperty().addListener((obs, o, n) -> applyFilters());
     }
 
     private void applyFilters() {
-        String textFilter = txtFilter.getText().toLowerCase();
-        String sizeFilter = comboSizeFilter.getSelectionModel().getSelectedItem();
-        boolean showOnlyLarge = chkShowOnlyLarge.isSelected();
+        String text      = txtFilter.getText().toLowerCase().trim();
+        String sizeRange = comboSizeFilter.getSelectionModel().getSelectedItem();
+        boolean onlyLarge = chkShowOnlyLarge.isSelected();
 
         filteredDuplicates.setPredicate(file -> {
-            // Filtro por texto
-            if (textFilter != null && !textFilter.isEmpty()) {
-                if (!file.getFileName().toLowerCase().contains(textFilter) &&
-                    !file.getPath().toLowerCase().contains(textFilter)) {
-                    return false;
-                }
-            }
-
-            // Filtro por tamaño
-            if (sizeFilter != null && !sizeFilter.equals("Todos")) {
-                long sizeBytes = file.getSizeBytes();
-                switch (sizeFilter) {
-                    case "< 1MB":
-                        if (sizeBytes >= 1024 * 1024) return false;
-                        break;
-                    case "1-10MB":
-                        if (sizeBytes < 1024 * 1024 || sizeBytes >= 10 * 1024 * 1024) return false;
-                        break;
-                    case "10-100MB":
-                        if (sizeBytes < 10 * 1024 * 1024 || sizeBytes >= 100 * 1024 * 1024) return false;
-                        break;
-                    case "> 100MB":
-                        if (sizeBytes < 100 * 1024 * 1024) return false;
-                        break;
-                }
-            }
-
-            // Filtro de archivos grandes
-            if (showOnlyLarge && file.getSizeBytes() < 10 * 1024 * 1024) {
+            if (!text.isEmpty() &&
+                !file.getFileName().toLowerCase().contains(text) &&
+                !file.getPath().toLowerCase().contains(text))
                 return false;
+
+            if (sizeRange != null && !"Todos".equals(sizeRange)) {
+                long b = file.getSizeBytes();
+                switch (sizeRange) {
+                    case "< 1 MB"      -> { if (b >= 1_048_576)                         return false; }
+                    case "1–10 MB"     -> { if (b < 1_048_576 || b >= 10_485_760)       return false; }
+                    case "10–100 MB"   -> { if (b < 10_485_760 || b >= 104_857_600)     return false; }
+                    case "> 100 MB"    -> { if (b < 104_857_600)                         return false; }
+                }
             }
+
+            if (onlyLarge && file.getSizeBytes() < 10_485_760) return false;
 
             return true;
         });
     }
 
-    @FXML
+    // ── Load scans ────────────────────────────────────────────────────────────
+
     private void loadAvailableScans() {
-        try {
-            // TODO: Cargar lista de escaneos disponibles desde API
-            scanList.addAll("scan_1234", "scan_5678", "scan_9012");
-            comboScanId.setItems(scanList);
-        } catch (Exception e) {
-            UIUtils.showErrorDialog("Error", "No se pudieron cargar los escaneos: " + e.getMessage());
-        }
+        apiClient.listAllScansAsync()
+            .thenAccept(scans -> Platform.runLater(() -> {
+                scanList.clear();
+                for (Map<String, Object> s : scans) {
+                    if ("completed".equals(s.get("status"))) {
+                        scanList.add(s.get("scan_id").toString());
+                    }
+                }
+                comboScanId.setItems(scanList);
+                if (!scanList.isEmpty()) comboScanId.getSelectionModel().selectFirst();
+            }))
+            .exceptionally(ex -> {
+                Platform.runLater(() ->
+                    UIUtils.showErrorDialog("Error", "No se pudieron cargar los escaneos: " + ex.getMessage()));
+                return null;
+            });
     }
+
+    // ── Refresh duplicates ────────────────────────────────────────────────────
 
     @FXML
     private void refreshDuplicates() {
-        String selectedScan = comboScanId.getSelectionModel().getSelectedItem();
-        if (selectedScan == null) {
-            UIUtils.showWarningDialog("Información", "Por favor selecciona un escaneo primero.");
+        String scanId = comboScanId.getSelectionModel().getSelectedItem();
+        if (scanId == null || scanId.isEmpty()) {
+            UIUtils.showWarningDialog("Información", "Por favor selecciona un escaneo completado.");
             return;
         }
 
-        // Set button loading state
-        UIUtils.setButtonLoadingState(btnRefresh, true);
-        
-        try {
-            // Show loading state in progress section
-            UIUtils.showLoadingState(progressSection, "Cargando duplicados...");
-            
-            // Cargar duplicados desde API
-            var duplicatesResult = apiClient.getDuplicates(selectedScan);
-            
-            Platform.runLater(() -> {
-                try {
-                    duplicateList.clear();
-                    groupMap.clear();
-                    
-                    // Verificar estructura del resultado
-                    if (duplicatesResult == null || !duplicatesResult.containsKey("groups")) {
-                        throw new Exception("Respuesta inválida de la API");
-                    }
-                    
-                    // Procesar grupos de duplicados
-                    Object groupsObj = duplicatesResult.get("groups");
-                    if (groupsObj instanceof List) {
-                        List<Map<String, Object>> groups = (List<Map<String, Object>>) groupsObj;
-                        
-                        if (groups.isEmpty()) {
-                            UIUtils.showEmptyState(progressSection, "No se encontraron archivos duplicados", "🎉");
-                            updateStats(duplicatesResult);
-                            UIUtils.setButtonLoadingState(btnRefresh, false);
-                            return;
-                        }
-                        
-                        for (Map<String, Object> group : groups) {
-                            String groupId = String.valueOf(group.get("hash"));
-                            Integer fileCount = group.containsKey("file_count") ? 
-                                Integer.valueOf(String.valueOf(group.get("file_count"))) : 0;
-                            Long totalSize = group.containsKey("total_size") ? 
-                                Long.valueOf(String.valueOf(group.get("total_size"))) : 0L;
-                            Long wastedSize = group.containsKey("wasted_size") ? 
-                                Long.valueOf(String.valueOf(group.get("wasted_size"))) : 0L;
-                            
-                            DuplicateGroup duplicateGroup = new DuplicateGroup(
-                                groupId, fileCount, totalSize, wastedSize
-                            );
-                            groupMap.put(groupId, duplicateGroup);
-                            
-                            // Agregar archivos del grupo
-                            Object duplicatesObj = group.get("duplicates");
-                            if (duplicatesObj instanceof List) {
-                                List<Map<String, Object>> duplicates = (List<Map<String, Object>>) duplicatesObj;
-                                for (Map<String, Object> file : duplicates) {
-                                    String path = String.valueOf(file.get("path"));
-                                    String name = String.valueOf(file.get("name"));
-                                    Long size = file.containsKey("size") ? 
-                                        Long.valueOf(String.valueOf(file.get("size"))) : 0L;
-                                    String modified = String.valueOf(file.get("modified"));
-                                    Boolean isOriginal = file.containsKey("is_original") ? 
-                                        Boolean.valueOf(String.valueOf(file.get("is_original"))) : false;
-                                    
-                                    DuplicateFile duplicateFile = new DuplicateFile(
-                                        groupId, path, name, size, modified, isOriginal
-                                    );
-                                    duplicateList.add(duplicateFile);
-                                }
-                            }
-                        }
-                    }
-                    
-                    updateStats(duplicatesResult);
-                    UIUtils.hideLoadingState(progressSection);
-                    
-                } catch (Exception parseError) {
-                    UIUtils.showErrorState(progressSection, 
-                        "Error procesando datos", 
-                        "No se pudieron procesar los datos de duplicados: " + parseError.getMessage());
-                } finally {
-                    UIUtils.setButtonLoadingState(btnRefresh, false);
-                }
+        setLoading(true, "Analizando duplicados… (esto puede tardar)");
+        duplicateList.clear();
+        groupMap.clear();
+
+        apiClient.getDuplicatesAsync(scanId)
+            .thenAccept(result -> Platform.runLater(() -> {
+                parseDuplicatesResult(result);
+                setLoading(false, "");
+            }))
+            .exceptionally(ex -> {
+                Platform.runLater(() -> {
+                    setLoading(false, "");
+                    UIUtils.showErrorDialog("Error de conexión",
+                        "No se pudieron cargar los duplicados: " + ex.getMessage());
+                });
+                return null;
             });
-            
-        } catch (Exception e) {
-            UIUtils.hideLoadingState(progressSection);
-            UIUtils.showErrorState(progressSection, 
-                "Error de conexión", 
-                "No se pudieron cargar los duplicados: " + e.getMessage());
-            UIUtils.setButtonLoadingState(btnRefresh, false);
+    }
+
+    @SuppressWarnings("unchecked")
+    private void parseDuplicatesResult(Map<String, Object> result) {
+        updateStats(result);
+
+        Object raw = result.get("groups");
+        if (!(raw instanceof JsonArray)) return;
+
+        JsonArray groups = (JsonArray) raw;
+
+        if (groups.size() == 0) {
+            UIUtils.showInfoDialog("Sin duplicados", "🎉 No se encontraron archivos duplicados en este escaneo.");
+            return;
+        }
+
+        for (JsonElement groupEl : groups) {
+            JsonObject g = groupEl.getAsJsonObject();
+
+            String groupHash = safeStr(g, "hash");
+            int    fileCount  = safeInt(g, "file_count");
+            long   totalSize  = safeLong(g, "total_size");
+            long   wasted     = safeLong(g, "wasted_size");
+
+            groupMap.put(groupHash, new DuplicateGroup(groupHash, fileCount, totalSize, wasted));
+
+            if (!g.has("duplicates")) continue;
+            for (JsonElement fileEl : g.get("duplicates").getAsJsonArray()) {
+                JsonObject f = fileEl.getAsJsonObject();
+                duplicateList.add(new DuplicateFile(
+                    groupHash,
+                    safeStr(f, "path"),
+                    safeStr(f, "name"),
+                    safeLong(f, "size"),
+                    safeStr(f, "modified"),
+                    f.has("is_original") && f.get("is_original").getAsBoolean()
+                ));
+            }
         }
     }
 
     private void updateStats(Map<String, Object> result) {
+        int  groups     = intVal(result, "total_groups");
+        int  dups       = intVal(result, "total_duplicates");
+        long wasted     = longVal(result, "total_wasted");
+
         statsSection.setVisible(true);
         statsSection.setManaged(true);
-        
-        try {
-            Integer totalGroups = result.containsKey("total_groups") ? 
-                Integer.valueOf(String.valueOf(result.get("total_groups"))) : 0;
-            Integer totalDuplicates = result.containsKey("total_duplicates") ? 
-                Integer.valueOf(String.valueOf(result.get("total_duplicates"))) : 0;
-            Long totalWasted = result.containsKey("total_wasted") ? 
-                Long.valueOf(String.valueOf(result.get("total_wasted"))) : 0L;
-            
-            lblTotalGroups.setText(String.valueOf(totalGroups));
-            lblTotalDuplicates.setText(String.valueOf(totalDuplicates));
-            lblSpaceWasted.setText(FormatUtils.formatFileSize(totalWasted));
-            lblSpaceRecoverable.setText(FormatUtils.formatFileSize(totalWasted));
-        } catch (Exception e) {
-            System.err.println("Error actualizando estadísticas: " + e.getMessage());
-            lblTotalGroups.setText("0");
-            lblTotalDuplicates.setText("0");
-            lblSpaceWasted.setText("0 B");
-            lblSpaceRecoverable.setText("0 B");
-        }
+        lblTotalGroups.setText(String.valueOf(groups));
+        lblTotalDuplicates.setText(String.valueOf(dups));
+        lblSpaceWasted.setText(FormatUtils.formatFileSize(wasted));
+        lblSpaceRecoverable.setText(FormatUtils.formatFileSize(wasted));
     }
 
-    private void showGroupDetails(DuplicateFile selectedFile) {
-        if (selectedFile == null) {
-            groupDetailsSection.setVisible(false);
-            groupDetailsSection.setManaged(false);
-            return;
-        }
+    // ── Group details panel ───────────────────────────────────────────────────
 
-        DuplicateGroup group = groupMap.get(selectedFile.getGroupId());
-        if (group != null) {
-            groupDetailsSection.setVisible(true);
-            groupDetailsSection.setManaged(true);
-            
-            lblGroupHash.setText(group.getHash());
-            lblGroupFileCount.setText(String.valueOf(group.getFileCount()));
-            lblGroupTotalSize.setText(FormatUtils.formatFileSize(group.getTotalSize()));
-            lblGroupWastedSize.setText(FormatUtils.formatFileSize(group.getWastedSize()));
-        }
+    private void showGroupDetails(DuplicateFile file) {
+        DuplicateGroup group = groupMap.get(file.getGroupId());
+        if (group == null) { hideGroupDetails(); return; }
+
+        groupDetailsSection.setVisible(true);
+        groupDetailsSection.setManaged(true);
+
+        // Show abbreviated hash
+        String hash = group.getHash();
+        lblGroupHash.setText(hash.length() > 16 ? hash.substring(0, 16) + "…" : hash);
+        lblGroupFileCount.setText(String.valueOf(group.getFileCount()));
+        lblGroupTotalSize.setText(FormatUtils.formatFileSize(group.getTotalSize()));
+        lblGroupWastedSize.setText(FormatUtils.formatFileSize(group.getWastedSize()));
     }
+
+    private void hideGroupDetails() {
+        groupDetailsSection.setVisible(false);
+        groupDetailsSection.setManaged(false);
+    }
+
+    // ── Selection ─────────────────────────────────────────────────────────────
 
     @FXML
     private void selectAll() {
-        for (DuplicateFile file : duplicateList) {
-            file.setSelected(true);
-        }
+        // Select only duplicates (not originals) in current filtered view
+        filteredDuplicates.forEach(f -> {
+            if (!f.isOriginal()) f.setSelected(true);
+        });
         tableDuplicates.refresh();
         updateDeleteButton();
     }
 
     @FXML
     private void deselectAll() {
-        for (DuplicateFile file : duplicateList) {
-            file.setSelected(false);
-        }
+        duplicateList.forEach(f -> f.setSelected(false));
         tableDuplicates.refresh();
         updateDeleteButton();
     }
 
-    @FXML
-    private void deleteSelected() {
-        List<String> filesToDelete = duplicateList.stream()
-            .filter(DuplicateFile::isSelected)
-            .map(DuplicateFile::getPath)
-            .toList();
-            
-        if (filesToDelete.isEmpty()) {
-            UIUtils.showInfoDialog("Información", "No hay archivos seleccionados para eliminar.");
-            return;
-        }
-
-        boolean confirmed = UIUtils.showConfirmationDialog(
-            "Confirmar Eliminación",
-            "¿Estás seguro de eliminar " + filesToDelete.size() + " archivos?",
-            "Esta acción no se puede deshacer. Los archivos se moverán a la papelera."
-        );
-        
-        if (confirmed) {
-            try {
-                UIUtils.showLoadingState(progressSection, "Eliminando archivos...");
-                UIUtils.setButtonLoadingState(btnDeleteSelected, true);
-                
-                // TODO: Llamar a API para eliminar archivos
-                // var result = apiClient.deleteFiles(filesToDelete, true);
-                
-                Platform.runLater(() -> {
-                    UIUtils.hideLoadingState(progressSection);
-                    UIUtils.setButtonLoadingState(btnDeleteSelected, false);
-                    UIUtils.showInfoDialog("Éxito", "Se eliminaron " + filesToDelete.size() + " archivos.");
-                    refreshDuplicates();
-                });
-                
-            } catch (Exception e) {
-                UIUtils.hideLoadingState(progressSection);
-                UIUtils.setButtonLoadingState(btnDeleteSelected, false);
-                UIUtils.showErrorDialog("Error", "Error eliminando archivos: " + e.getMessage());
-            }
+    private void updateDeleteButton() {
+        long count = duplicateList.stream().filter(DuplicateFile::isSelected).count();
+        btnDeleteSelected.setDisable(count == 0);
+        if (count > 0) {
+            long size = duplicateList.stream()
+                .filter(DuplicateFile::isSelected)
+                .mapToLong(DuplicateFile::getSizeBytes).sum();
+            btnDeleteSelected.setText("🗑️ Eliminar " + count + " (" + FormatUtils.formatFileSize(size) + ")");
+        } else {
+            btnDeleteSelected.setText("🗑️ Eliminar Seleccionados");
         }
     }
 
+    // ── Delete selected ───────────────────────────────────────────────────────
+
+    @FXML
+    private void deleteSelected() {
+        List<String> toDelete = duplicateList.stream()
+            .filter(DuplicateFile::isSelected)
+            .map(DuplicateFile::getPath)
+            .collect(Collectors.toList());
+
+        if (toDelete.isEmpty()) {
+            UIUtils.showInfoDialog("Información", "No hay archivos seleccionados.");
+            return;
+        }
+
+        long totalSize = duplicateList.stream()
+            .filter(DuplicateFile::isSelected)
+            .mapToLong(DuplicateFile::getSizeBytes).sum();
+
+        boolean confirmed = UIUtils.showConfirmationDialog(
+            "Confirmar Eliminación",
+            "¿Eliminar " + toDelete.size() + " archivos (" + FormatUtils.formatFileSize(totalSize) + ")?",
+            "Los archivos se moverán a la papelera de reciclaje."
+        );
+
+        if (!confirmed) return;
+
+        setLoading(true, "Eliminando archivos…");
+
+        apiClient.deleteFilesAsync(toDelete, true)
+            .thenAccept(result -> Platform.runLater(() -> {
+                setLoading(false, "");
+                int deleted = intVal(result, "deleted_count");
+                long freed  = longVal(result, "space_freed");
+
+                @SuppressWarnings("unchecked")
+                List<String> failed = (List<String>) result.getOrDefault("failed", List.of());
+
+                String msg = "✅ Eliminados: " + deleted + " archivos\n"
+                           + "💾 Espacio liberado: " + FormatUtils.formatFileSize(freed);
+                if (!failed.isEmpty()) msg += "\n⚠️ Fallidos: " + failed.size();
+
+                UIUtils.showInfoDialog("Eliminación completada", msg);
+
+                // Remove deleted files from UI list
+                @SuppressWarnings("unchecked")
+                List<String> deletedPaths = (List<String>) result.getOrDefault("deleted", List.of());
+                duplicateList.removeIf(f -> deletedPaths.contains(f.getPath()));
+                updateDeleteButton();
+            }))
+            .exceptionally(ex -> {
+                Platform.runLater(() -> {
+                    setLoading(false, "");
+                    UIUtils.showErrorDialog("Error", "Error eliminando: " + ex.getMessage());
+                });
+                return null;
+            });
+    }
+
+    // ── Group-level actions ───────────────────────────────────────────────────
+
     @FXML
     private void keepOriginal() {
-        // TODO: Implementar lógica para mantener solo el original
-        UIUtils.showInfoDialog("Información", "Función próximamente...");
+        if (selectedGroupHash == null) {
+            UIUtils.showWarningDialog("Info", "Selecciona un archivo primero.");
+            return;
+        }
+
+        // Select all non-originals in the selected group
+        duplicateList.stream()
+            .filter(f -> f.getGroupId().equals(selectedGroupHash) && !f.isOriginal())
+            .forEach(f -> f.setSelected(true));
+
+        tableDuplicates.refresh();
+        updateDeleteButton();
+        UIUtils.showInfoDialog("Listo", "Duplicados del grupo seleccionados. Presiona 'Eliminar Seleccionados' para borrarlos.");
     }
 
     @FXML
     private void deleteAllExcept() {
-        // TODO: Implementar lógica para eliminar todos excepto el original
-        UIUtils.showInfoDialog("Información", "Función próximamente...");
+        keepOriginal();   // same logic: selects the duplicates
+        deleteSelected(); // then deletes them
     }
 
     @FXML
     private void openFolder() {
-        DuplicateFile selected = tableDuplicates.getSelectionModel().getSelectedItem();
-        if (selected != null) {
-            try {
-                // TODO: Abrir carpeta contenedora del archivo
-                UIUtils.showInfoDialog("Información", "Función de abrir carpeta próximamente...");
-            } catch (Exception e) {
-                UIUtils.showErrorDialog("Error", "No se pudo abrir la carpeta: " + e.getMessage());
+        DuplicateFile sel = tableDuplicates.getSelectionModel().getSelectedItem();
+        if (sel == null) { UIUtils.showWarningDialog("Info", "Selecciona un archivo primero."); return; }
+
+        try {
+            String folder = new java.io.File(sel.getPath()).getParent();
+            if (folder != null) {
+                new ProcessBuilder("explorer", folder).start();
             }
+        } catch (Exception e) {
+            UIUtils.showErrorDialog("Error", "No se pudo abrir la carpeta: " + e.getMessage());
         }
     }
 
-    private void updateDeleteButton() {
-        boolean hasSelection = duplicateList.stream().anyMatch(DuplicateFile::isSelected);
-        btnDeleteSelected.setDisable(!hasSelection);
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private void setLoading(boolean loading, String message) {
+        progressSection.setVisible(loading);
+        progressSection.setManaged(loading);
+        if (!message.isEmpty()) lblProgress.setText(message);
+
+        btnRefresh.setDisable(loading);
+        btnDeleteSelected.setDisable(loading);
+        if (loading) progressBar.setProgress(ProgressBar.INDETERMINATE_PROGRESS);
+    }
+
+    private static String safeStr(JsonObject o, String k) {
+        return (o.has(k) && !o.get(k).isJsonNull()) ? o.get(k).getAsString() : "";
+    }
+    private static int safeInt(JsonObject o, String k) {
+        return (o.has(k) && !o.get(k).isJsonNull()) ? o.get(k).getAsInt() : 0;
+    }
+    private static long safeLong(JsonObject o, String k) {
+        return (o.has(k) && !o.get(k).isJsonNull()) ? o.get(k).getAsLong() : 0L;
+    }
+    private static String str(Map<String, Object> m, String k) {
+        Object v = m.get(k); return v != null ? v.toString() : "";
+    }
+    private static int intVal(Map<String, Object> m, String k) {
+        try { return Integer.parseInt(str(m, k)); } catch (Exception e) { return 0; }
+    }
+    private static long longVal(Map<String, Object> m, String k) {
+        try { return Long.parseLong(str(m, k)); } catch (Exception e) { return 0L; }
     }
 }

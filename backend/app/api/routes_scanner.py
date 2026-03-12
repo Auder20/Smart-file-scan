@@ -8,12 +8,12 @@ from threading import Thread
 from fastapi import APIRouter, HTTPException
 
 from app.models.file_info import ScanRequest, ScanResult, ScanStatus, ScanProgress
-from app.core.scanner import collect_all_files
+from app.core.scanner import scan_directory
+from app.models.file_info import FileInfo
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/scan", tags=["scanner"])
 
-# Estado en memoria — un solo usuario, un dict es suficiente
 _scan_results:  dict[str, ScanResult]   = {}
 _scan_progress: dict[str, ScanProgress] = {}
 
@@ -21,7 +21,6 @@ _scan_progress: dict[str, ScanProgress] = {}
 @router.post("", status_code=202)
 def start_scan(request: ScanRequest) -> dict:
     scan_id = str(uuid.uuid4())[:8]
-
     _scan_progress[scan_id] = ScanProgress(
         scan_id     = scan_id,
         status      = ScanStatus.PENDING,
@@ -29,106 +28,107 @@ def start_scan(request: ScanRequest) -> dict:
         files_found = 0,
         message     = "Iniciando escaneo...",
     )
+    Thread(target=_run_scan, args=(scan_id, request), daemon=True).start()
+    return {"scan_id": scan_id, "status": "accepted"}
 
-    thread = Thread(
-        target = _run_scan,
-        args   = (scan_id, request),
-        daemon = True,
-    )
-    thread.start()
 
-    return {
-        "scan_id": scan_id,
-        "status":  "accepted",
-    }
+@router.get("")
+def list_scans() -> list[dict]:
+    return [
+        {"scan_id": sid, "status": p.status, "files_found": p.files_found}
+        for sid, p in _scan_progress.items()
+    ]
+
+
+# ⚠️  CRITICAL: /all and /stats MUST come BEFORE /{scan_id}
+# FastAPI matches routes top-to-bottom; if /{scan_id} is first,
+# "all" and "stats" are treated as scan IDs → 404.
+
+@router.get("/all")
+def list_all_scans() -> list[dict]:
+    """Returns all scans with full info including completed results."""
+    all_scans = []
+
+    for sid, progress in _scan_progress.items():
+        scan_info: dict = {
+            "scan_id":      sid,
+            "status":       progress.status,
+            "files_found":  progress.files_found,
+            "progress":     progress.progress,
+            "message":      progress.message,
+            "root_path":    None,
+            "total_files":  0,
+            "total_size":   0,
+            "scanned_at":   None,
+            "duration_sec": 0.0,
+        }
+
+        if progress.status == ScanStatus.COMPLETED and sid in _scan_results:
+            r = _scan_results[sid]
+            scan_info.update({
+                "root_path":    r.root_path,
+                "total_files":  r.total_files,
+                "total_size":   r.total_size,
+                "scanned_at":   r.scanned_at.isoformat(),
+                "duration_sec": r.duration_sec,
+            })
+
+        all_scans.append(scan_info)
+
+    return sorted(all_scans, key=lambda x: x.get("scanned_at") or "", reverse=True)
 
 
 @router.get("/{scan_id}/progress")
 def get_progress(scan_id: str) -> ScanProgress:
-    progress = _scan_progress.get(scan_id)
-    if not progress:
+    p = _scan_progress.get(scan_id)
+    if not p:
         raise HTTPException(404, detail=f"Scan '{scan_id}' no encontrado")
-    return progress
+    return p
 
 
 @router.get("/{scan_id}")
 def get_result(scan_id: str) -> ScanResult:
     result = _scan_results.get(scan_id)
     if not result:
-        progress = _scan_progress.get(scan_id)
-        if progress:
-            raise HTTPException(409, detail=f"Scan en progreso ({progress.progress}%)")
+        p = _scan_progress.get(scan_id)
+        if p:
+            raise HTTPException(409, detail=f"Scan en progreso ({p.progress}%)")
         raise HTTPException(404, detail=f"Scan '{scan_id}' no encontrado")
     return result
 
 
-@router.get("")
-def list_scans() -> list[dict]:
-    return [
-        {
-            "scan_id":     sid,
-            "status":      p.status,
-            "files_found": p.files_found,
-        }
-        for sid, p in _scan_progress.items()
-    ]
-
-
-@router.get("/all")
-def list_all_scans() -> list[dict]:
-    """Retorna todos los escaneos con información completa incluyendo resultados"""
-    all_scans = []
-    
-    # Escaneos en progreso
-    for sid, progress in _scan_progress.items():
-        scan_info = {
-            "scan_id": sid,
-            "status": progress.status,
-            "files_found": progress.files_found,
-            "progress": progress.progress,
-            "message": progress.message,
-            "root_path": None,
-            "total_files": 0,
-            "total_size": 0,
-            "scanned_at": None,
-            "duration_sec": 0.0
-        }
-        
-        # Si está completado, agregar información del resultado
-        if progress.status == ScanStatus.COMPLETED and sid in _scan_results:
-            result = _scan_results[sid]
-            scan_info.update({
-                "root_path": result.root_path,
-                "total_files": result.total_files,
-                "total_size": result.total_size,
-                "scanned_at": result.scanned_at.isoformat(),
-                "duration_sec": result.duration_sec
-            })
-        
-        all_scans.append(scan_info)
-    
-    return sorted(all_scans, key=lambda x: x.get("scanned_at", ""), reverse=True)
-
-
 @router.delete("/{scan_id}")
 def delete_scan(scan_id: str) -> dict:
-    """Elimina un escaneo completado"""
-    if scan_id in _scan_results:
-        del _scan_results[scan_id]
-    
-    if scan_id in _scan_progress:
-        del _scan_progress[scan_id]
-    
+    _scan_results.pop(scan_id, None)
+    _scan_progress.pop(scan_id, None)
     return {"message": f"Scan {scan_id} eliminado correctamente"}
 
 
+# ── Background worker ──────────────────────────────────────────────────────────
+
 def _run_scan(scan_id: str, request: ScanRequest) -> None:
-    progress        = _scan_progress[scan_id]
-    progress.status = ScanStatus.RUNNING
+    import time
+
+    progress         = _scan_progress[scan_id]
+    progress.status  = ScanStatus.RUNNING
     progress.message = "Escaneando..."
 
+    files: list[FileInfo] = []
+    start = time.time()
+
     try:
-        files, duration = collect_all_files(request)
+        estimated = _estimate_file_count(request.path)
+
+        for event in scan_directory(request):
+            if isinstance(event, FileInfo):
+                files.append(event)
+                count            = len(files)
+                progress.files_found = count
+                progress.message = f"Escaneando… {count:,} archivos encontrados"
+                if estimated > 0:
+                    progress.progress = min(int(count * 100 / estimated), 99)
+
+        duration = round(time.time() - start, 2)
 
         _scan_results[scan_id] = ScanResult(
             scan_id      = scan_id,
@@ -144,9 +144,26 @@ def _run_scan(scan_id: str, request: ScanRequest) -> None:
         progress.status      = ScanStatus.COMPLETED
         progress.progress    = 100
         progress.files_found = len(files)
-        progress.message     = f"Completado: {len(files):,} archivos"
+        progress.message     = f"Completado: {len(files):,} archivos en {duration}s"
 
     except Exception as e:
         logger.error("Error en scan %s: %s", scan_id, e, exc_info=True)
         progress.status  = ScanStatus.FAILED
         progress.message = str(e)
+
+
+def _estimate_file_count(path: str) -> int:
+    import os
+    count = 0
+    try:
+        for root, dirs, files in os.walk(path):
+            depth = root.replace(path, "").count(os.sep)
+            if depth >= 2:
+                dirs[:] = []
+                continue
+            count += len(files)
+            if count > 100_000:
+                return count
+    except Exception:
+        pass
+    return count
