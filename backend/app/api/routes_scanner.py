@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 import logging
 from datetime import datetime
-from threading import Thread
+from threading import Thread, Event
 import asyncio
 import json
 import websockets
@@ -14,6 +14,7 @@ from fastapi.responses import HTMLResponse
 from app.models.file_info import ScanRequest, ScanResult, ScanStatus, ScanProgress
 from app.core.scanner import scan_directory
 from app.models.file_info import FileInfo
+from app.db.database import save_scan_metadata, save_file_batch, get_scan
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/scan", tags=["scanner"])
@@ -23,6 +24,26 @@ _active_connections: list[WebSocket] = []
 
 _scan_results:  dict[str, ScanResult]   = {}
 _scan_progress: dict[str, ScanProgress] = {}
+
+# Global event loop reference for WebSocket communication from threads
+_event_loop: asyncio.AbstractEventLoop = None
+
+# Global cancel events for scans
+_scan_cancel_events: dict[str, Event] = {}
+
+def _notify_ws(data: dict) -> None:
+    """Send data to all active WebSocket connections safely from any thread."""
+    if not _event_loop:
+        logger.warning("Event loop not available for WebSocket notification")
+        return
+    
+    message = json.dumps(data)
+    # Use a copy to avoid modification during iteration
+    for ws in _active_connections[:]:
+        try:
+            asyncio.run_coroutine_threadsafe(ws.send_text(message), _event_loop)
+        except Exception as e:
+            logger.debug(f"Failed to send WebSocket message: {e}")
 
 
 @router.post("", status_code=202)
@@ -134,6 +155,11 @@ def get_result(scan_id: str) -> ScanResult:
 
 @router.delete("/{scan_id}")
 def delete_scan(scan_id: str) -> dict:
+    # Cancel the scan if it's running
+    if scan_id in _scan_cancel_events:
+        _scan_cancel_events[scan_id].set()
+        del _scan_cancel_events[scan_id]
+    
     _scan_results.pop(scan_id, None)
     _scan_progress.pop(scan_id, None)
     return {"message": f"Scan {scan_id} eliminado correctamente"}
@@ -144,15 +170,44 @@ def delete_scan(scan_id: str) -> dict:
 def _run_scan(scan_id: str, request: ScanRequest) -> None:
     import time
 
+    # Create cancel event for this scan
+    cancel_event = Event()
+    _scan_cancel_events[scan_id] = cancel_event
+
     progress         = _scan_progress[scan_id]
     progress.status  = ScanStatus.RUNNING
     progress.message = "Escaneando..."
     files: list[FileInfo] = []
     start = time.time()
     
+    # Save initial scan metadata
     try:
+        save_scan_metadata(scan_id, request.path, ScanStatus.RUNNING.value)
+    except Exception as e:
+        logger.error(f"Failed to save scan metadata: {e}")
+    
+    try:
+        # Estimate file count before scanning
         estimated = _estimate_file_count(request.path)
+        
         for event in scan_directory(request):
+            # Check if scan was cancelled
+            if cancel_event.is_set():
+                logger.info(f"Scan {scan_id} cancelled by user")
+                progress.status = ScanStatus.FAILED
+                progress.message = "Escaneo cancelado por el usuario"
+                try:
+                    save_scan_metadata(scan_id, request.path, ScanStatus.FAILED.value)
+                except:
+                    pass
+                _notify_ws({
+                    "type": "error",
+                    "scan_id": scan_id,
+                    "message": progress.message,
+                    "timestamp": datetime.now().isoformat()
+                })
+                return
+
             if isinstance(event, FileInfo):
                 files.append(event)
                 count            = len(files)
@@ -160,6 +215,14 @@ def _run_scan(scan_id: str, request: ScanRequest) -> None:
                 progress.message = f"Escaneando… {count:,} archivos encontrados"
                 if estimated > 0:
                     progress.progress = min(int(count * 100 / estimated), 99)
+                
+                # Save batch to SQLite every 500 files
+                if count % 500 == 0:
+                    try:
+                        save_file_batch(scan_id, files[-500:])  # Save last 500 files
+                        logger.debug(f"Saved batch of 500 files to database for scan {scan_id}")
+                    except Exception as e:
+                        logger.error(f"Failed to save file batch: {e}")
                 
                 # Enviar actualización por WebSocket a todos los clientes conectados
                 update_data = {
@@ -173,23 +236,37 @@ def _run_scan(scan_id: str, request: ScanRequest) -> None:
                     "timestamp": datetime.now().isoformat()
                 }
                 
-                for ws in _active_connections:
-                    try:
-                        asyncio.create_task(ws.send_text(json.dumps(update_data)))
-                    except:
-                        pass  # Ignorar errores de WebSocket desconectados
-                
-                if count % 100 == 0:  # Enviar cada 100 archivos
-                    yield event
+                _notify_ws(update_data)
+        
+        # Save remaining files
+        remaining_files = files[len(files) - (len(files) % 500):] if len(files) % 500 != 0 else []
+        if remaining_files:
+            try:
+                save_file_batch(scan_id, remaining_files)
+                logger.debug(f"Saved final batch of {len(remaining_files)} files to database for scan {scan_id}")
+            except Exception as e:
+                logger.error(f"Failed to save final file batch: {e}")
         
         duration = round(time.time() - start, 2)
+        total_size = sum(f.size for f in files)
+        
+        # Update scan metadata with completion data
+        try:
+            save_scan_metadata(
+                scan_id, request.path, ScanStatus.COMPLETED.value,
+                len(files), total_size, datetime.now(), duration
+            )
+        except Exception as e:
+            logger.error(f"Failed to update scan metadata: {e}")
+        
+        # Keep light reference in memory for compatibility
         _scan_results[scan_id] = ScanResult(
             scan_id      = scan_id,
             root_path    = request.path,
             status       = ScanStatus.COMPLETED,
             total_files  = len(files),
-            total_size   = sum(f.size for f in files),
-            files        = files,
+            total_size   = total_size,
+            files        = files[:1000],  # Keep only first 1000 files in memory
             scanned_at   = datetime.now(),
             duration_sec = duration,
         )
@@ -208,16 +285,18 @@ def _run_scan(scan_id: str, request: ScanRequest) -> None:
             "timestamp": datetime.now().isoformat()
         }
         
-        for ws in _active_connections:
-            try:
-                asyncio.create_task(ws.send_text(json.dumps(final_update)))
-            except:
-                pass
+        _notify_ws(final_update)
                 
     except Exception as e:
         logger.error("Error en scan %s: %s", scan_id, e, exc_info=True)
         progress.status  = ScanStatus.FAILED
         progress.message = str(e)
+        
+        # Update scan metadata with error status
+        try:
+            save_scan_metadata(scan_id, request.path, ScanStatus.FAILED.value)
+        except:
+            pass
         
         # Enviar error por WebSocket
         error_update = {
@@ -227,11 +306,10 @@ def _run_scan(scan_id: str, request: ScanRequest) -> None:
             "timestamp": datetime.now().isoformat()
         }
         
-        for ws in _active_connections:
-            try:
-                asyncio.create_task(ws.send_text(json.dumps(error_update)))
-            except:
-                pass
+        _notify_ws(error_update)
+    finally:
+        # Clean up cancel event
+        _scan_cancel_events.pop(scan_id, None)
 
 
 def _estimate_file_count(path: str) -> int:

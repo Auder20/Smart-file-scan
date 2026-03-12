@@ -19,6 +19,22 @@ from app.core.classifier import classify_file
 
 logger = logging.getLogger(__name__)
 
+def _estimate_file_count(path: str) -> int:
+    """Estimar cantidad de archivos para decidir si usar paralelismo"""
+    count = 0
+    try:
+        for root, dirs, files in os.walk(path):
+            depth = root.replace(path, "").count(os.sep)
+            if depth >= 2:
+                dirs[:] = []
+                continue
+            count += len(files)
+            if count > 100_000:
+                return count
+    except Exception:
+        pass
+    return count
+
 # Cache Redis para evitar reescaneos
 try:
     redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
@@ -158,7 +174,7 @@ def scan_directory(request: ScanRequest) -> Generator:
     root    = os.path.abspath(request.path)
     exclude = set(d.lower() for d in request.exclude_dirs)
     count   = 0
-    max_files = 10000  # Límite para evitar congelamiento
+    max_files = 100000  # Límite aumentado para evitar congelamiento
     start_time = time.time()
     timeout = 300     # 5 minutos máximo por escaneo
 
@@ -300,20 +316,14 @@ def collect_all_files(request: ScanRequest) -> tuple[list[FileInfo], float]:
     # Si no hay cache, proceder con escaneo completo
     logger.info(f"Realizando escaneo completo de {request.path}")
     
-    # Detectar si es un disco grande (>100GB) para usar paralelismo
+    # Estimar cantidad de archivos para decidir si es un disco grande
     try:
-        total_size = sum(
-            sum(os.path.getsize(os.path.join(root, f))
-                for f in os.listdir(request.path) 
-                if os.path.isfile(os.path.join(root, f))
-            ) 
-            for root, _, files in os.walk(request.path, topdown=True)
-        )
-        is_large_drive = total_size > 100_000_000_000  # 100GB
+        estimated = _estimate_file_count(request.path)
+        is_large_drive = estimated > 50_000
     except:
         is_large_drive = False
     
-    logger.info(f"Escaneando {request.path} (tamaño: {total_size/1_000_000_000:.1f}GB, paralelo: {is_large_drive})")
+    logger.info(f"Escaneando {request.path} (estimados: {estimated:,} archivos, paralelo: {is_large_drive})")
     
     # Usar escaneo paralelo para discos grandes
     if is_large_drive:

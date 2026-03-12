@@ -32,6 +32,7 @@ import com.smartfileorganizer.api.ApiClient;
 import com.smartfileorganizer.models.ScanInfo;
 import com.smartfileorganizer.models.ScanProgress;
 import com.smartfileorganizer.utils.FormatUtils;
+import com.google.gson.JsonObject;
 
 // Helper class to store both display name and full path
 class PathItem {
@@ -93,6 +94,7 @@ public class ScannerController implements Initializable {
     private Timer progressTimer;
     private String currentScanId;
     private final ObservableList<ScanInfo> scanList = FXCollections.observableArrayList();
+    private boolean isWebSocketConnected = false;
 
     @Override
     public void initialize(URL url, ResourceBundle rb) {
@@ -420,6 +422,19 @@ public class ScannerController implements Initializable {
             progressTimer.cancel();
             progressTimer = null;
         }
+        
+        // Cerrar WebSocket si está conectado
+        if (isWebSocketConnected) {
+            ApiClient.closeScanWebSocket();
+            isWebSocketConnected = false;
+            
+            // Cancelar escaneo en backend
+            try {
+                apiClient.deleteScan(currentScanId);
+            } catch (Exception e) {
+                System.err.println("Error cancelando escaneo: " + e.getMessage());
+            }
+        }
 
         // Resetear UI
         btnStartScan.setDisable(false);
@@ -467,33 +482,74 @@ public class ScannerController implements Initializable {
     }
 
     private void startProgressMonitoring() {
-        progressTimer = new Timer();
-        progressTimer.scheduleAtFixedRate(new TimerTask() {
-            @Override
-            public void run() {
-                try {
-                    ScanProgress progress = apiClient.getScanProgress(currentScanId);
-                    
-                    Platform.runLater(() -> {
-                        updateProgressUI(progress);
-                        
-                        if (progress.getStatus().equals("completed") || 
-                            progress.getStatus().equals("failed")) {
-                            stopScan();
-                            if (progress.getStatus().equals("completed")) {
-                                showResults(progress);
-                            }
-                        }
-                    });
-                    
-                } catch (Exception e) {
-                    Platform.runLater(() -> {
-                        showAlert("Error", "Error obteniendo progreso: " + e.getMessage());
-                        stopScan();
-                    });
-                }
-            }
-        }, 0, 1000); // Actualizar cada segundo
+        // Usar WebSocket para monitoreo en tiempo real
+        ApiClient.connectScanWebSocket(currentScanId, this::handleWsMessage, 
+            this::onScanComplete, this::onScanError);
+        isWebSocketConnected = true;
+    }
+    
+    private void handleWsMessage(JsonObject data) {
+        String type = data.get("type").getAsString();
+        
+        switch (type) {
+            case "progress":
+                updateProgressUIFromWs(data);
+                break;
+            case "completed":
+                onScanComplete();
+                break;
+            case "error":
+                onScanError(data.get("message").getAsString());
+                break;
+        }
+    }
+    
+    private void updateProgressUIFromWs(JsonObject data) {
+        double progress = data.get("progress").getAsDouble();
+        int filesFound = data.get("files_found").getAsInt();
+        String message = data.get("message").getAsString();
+        String currentDir = data.has("current_dir") ? data.get("current_dir").getAsString() : "";
+        
+        Platform.runLater(() -> {
+            progressBar.setProgress(progress / 100.0);
+            lblProgress.setText(String.format("%.1f%%", progress));
+            lblFilesFound.setText(String.format("%,d archivos encontrados", filesFound));
+            lblCurrentDir.setText(message);
+            lblStatus.setText("Escaneando en progreso...");
+        });
+    }
+    
+    private void onScanComplete() {
+        Platform.runLater(() -> {
+            stopScan();
+            lblStatus.setText("Completado");
+            showResultsFromWs();
+        });
+    }
+    
+    private void onScanError(String errorMessage) {
+        Platform.runLater(() -> {
+            stopScan();
+            lblStatus.setText("Error: " + errorMessage);
+            showAlert("Error de Escaneo", errorMessage);
+        });
+    }
+    
+    private void showResultsFromWs() {
+        try {
+            var result = apiClient.getScanResult(currentScanId);
+            
+            lblTotalFiles.setText(String.format("%,d", result.getTotalFiles()));
+            lblTotalSize.setText(FormatUtils.formatFileSize(result.getTotalSize()));
+            lblScanTime.setText(String.format("%.1fs", result.getDurationSec()));
+            lblScanId.setText(currentScanId);
+            
+            resultsSection.setVisible(true);
+            resultsSection.setManaged(true);
+            
+        } catch (Exception e) {
+            showAlert("Error", "Error obteniendo resultados: " + e.getMessage());
+        }
     }
 
     private void updateProgressUI(ScanProgress progress) {

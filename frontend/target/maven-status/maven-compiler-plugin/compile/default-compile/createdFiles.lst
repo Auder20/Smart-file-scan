@@ -7,12 +7,12 @@ com\smartfileorganizer\controllers\MainController.class
 com\smartfileorganizer\controllers\ScannerController.class
 com\smartfileorganizer\models\RecentScan.class
 com\smartfileorganizer\models\ScanProgress.class
+com\smartfileorganizer\api\ApiClient$1.class
 com\smartfileorganizer\controllers\ScannerController$1.class
 com\smartfileorganizer\models\ScanResult.class
 com\smartfileorganizer\controllers\DuplicatesController.class
 com\smartfileorganizer\controllers\PathItem.class
 com\smartfileorganizer\utils\UIUtils.class
-com\smartfileorganizer\controllers\ScannerController$2.class
 com\smartfileorganizer\controllers\StatsController.class
 com\smartfileorganizer\api\ApiClient.class
 com\smartfileorganizer\models\ScanInfo.class

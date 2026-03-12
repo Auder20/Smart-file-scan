@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import os
 import logging
+import random
+import multiprocessing
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional, Callable
@@ -18,10 +20,16 @@ _PARTIAL_SIZE = 4 * 1024   # 4KB para el hash de pre-filtrado
 def find_duplicates(
     files: list[FileInfo],
     progress_callback: Optional[Callable[[int, int], None]] = None,
+    max_files: int = 30_000,
 ) -> list[DuplicateGroup]:
 
     if len(files) < 2:
         return []
+
+    # Si hay demasiados archivos, hacer muestreo aleatorio
+    if len(files) > max_files:
+        logger.warning(f"Demasiados archivos ({len(files):,}), muestreando {max_files:,} para análisis de duplicados")
+        files = random.sample(files, max_files)
 
     # ── Fase 1: agrupar por tamaño ────────────────────────────────────────
     # Archivos con tamaño único NO pueden ser duplicados
@@ -74,7 +82,7 @@ def _compute_hashes_parallel(
     files: list[FileInfo],
     partial: bool,
     callback: Optional[Callable[[int, int], None]] = None,
-    max_workers: int = 4,
+    max_workers: int = min(multiprocessing.cpu_count() * 2, 8),
 ) -> dict[FileInfo, Optional[str]]:
 
     results: dict[FileInfo, Optional[str]] = {}

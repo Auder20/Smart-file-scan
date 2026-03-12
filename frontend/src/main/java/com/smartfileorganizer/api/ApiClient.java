@@ -13,6 +13,8 @@ import java.util.Map;
 import java.util.HashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
+import javafx.application.Platform;
 
 public class ApiClient {
     private static final String BASE_URL = "http://localhost:8000";
@@ -24,6 +26,12 @@ public class ApiClient {
         .build();
 
     private static final MediaType JSON = MediaType.get("application/json");
+    
+    // WebSocket for real-time scan progress
+    private static WebSocket activeWebSocket;
+    private static Consumer<JsonObject> wsMessageHandler;
+    private static Runnable wsOnComplete;
+    private static Consumer<String> wsOnError;
 
     public ApiClient() {}
 
@@ -184,6 +192,10 @@ public class ApiClient {
                 throw new RuntimeException(e);
             }
         });
+    }
+
+    public void deleteScan(String scanId) throws Exception {
+        deleteScanAsync(scanId).get();
     }
 
     // ── Stats ─────────────────────────────────────────────────────────────────
@@ -425,6 +437,80 @@ public class ApiClient {
             if (json.has("message"))        result.put("message",         safeString(json, "message"));
             return result;
         }
+    }
+
+    // ── WebSocket Support ─────────────────────────────────────────────────────
+
+    public static void connectScanWebSocket(String scanId, Consumer<JsonObject> onMessage, 
+                                     Runnable onComplete, Consumer<String> onError) {
+        // Close existing connection if any
+        closeScanWebSocket();
+        
+        wsMessageHandler = onMessage;
+        wsOnComplete = onComplete;
+        wsOnError = onError;
+        
+        String wsUrl = "ws://localhost:8000/api/scan/ws/scan/" + scanId;
+        Request request = new Request.Builder().url(wsUrl).build();
+        
+        WebSocketListener listener = new WebSocketListener() {
+            @Override
+            public void onOpen(WebSocket webSocket, Response response) {
+                System.out.println("WebSocket connected for scan: " + scanId);
+            }
+            
+            @Override
+            public void onMessage(WebSocket webSocket, String text) {
+                try {
+                    JsonObject data = gson.fromJson(text, JsonObject.class);
+                    Platform.runLater(() -> {
+                        if (wsMessageHandler != null) {
+                            wsMessageHandler.accept(data);
+                        }
+                    });
+                } catch (Exception e) {
+                    System.err.println("Error parsing WebSocket message: " + e.getMessage());
+                }
+            }
+            
+            @Override
+            public void onClosing(WebSocket webSocket, int code, String reason) {
+                System.out.println("WebSocket closing for scan: " + scanId);
+            }
+            
+            @Override
+            public void onClosed(WebSocket webSocket, int code, String reason) {
+                System.out.println("WebSocket closed for scan: " + scanId);
+                Platform.runLater(() -> {
+                    if (wsOnComplete != null) {
+                        wsOnComplete.run();
+                    }
+                });
+            }
+            
+            @Override
+            public void onFailure(WebSocket webSocket, Throwable t, Response response) {
+                String error = "WebSocket connection failed: " + (t != null ? t.getMessage() : "Unknown error");
+                System.err.println(error);
+                Platform.runLater(() -> {
+                    if (wsOnError != null) {
+                        wsOnError.accept(error);
+                    }
+                });
+            }
+        };
+        
+        activeWebSocket = client.newWebSocket(request, listener);
+    }
+    
+    public static void closeScanWebSocket() {
+        if (activeWebSocket != null) {
+            activeWebSocket.close(1000, "Connection closed by client");
+            activeWebSocket = null;
+        }
+        wsMessageHandler = null;
+        wsOnComplete = null;
+        wsOnError = null;
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

@@ -1,4 +1,5 @@
 import logging
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -23,6 +24,11 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     logger.info("Backend iniciado")
     logger.info("Documentación en http://localhost:8000/docs")
+    
+    # Pass event loop to scanner module for WebSocket communication
+    import app.api.routes_scanner as scanner_mod
+    scanner_mod._event_loop = asyncio.get_running_loop()
+    
     yield
     logger.info("Backend cerrado")
 
