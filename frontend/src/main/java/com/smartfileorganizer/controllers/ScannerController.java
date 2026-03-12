@@ -95,6 +95,7 @@ public class ScannerController implements Initializable {
     private String currentScanId;
     private final ObservableList<ScanInfo> scanList = FXCollections.observableArrayList();
     private boolean isWebSocketConnected = false;
+    private boolean scanCompleted = false;
 
     @Override
     public void initialize(URL url, ResourceBundle rb) {
@@ -389,6 +390,9 @@ public class ScannerController implements Initializable {
         }
 
         try {
+            // Reset completion flag
+            scanCompleted = false;
+            
             // Iniciar escaneo
             currentScanId = apiClient.startScan(
                 path, 
@@ -520,10 +524,29 @@ public class ScannerController implements Initializable {
     }
     
     private void onScanComplete() {
+        if (scanCompleted) {
+            return; // Already processed completion
+        }
+        scanCompleted = true;
+        
         Platform.runLater(() -> {
-            stopScan();
-            lblStatus.setText("Completado");
+            // Close WebSocket
+            ApiClient.closeScanWebSocket();
+            isWebSocketConnected = false;
+            
+            // Reset UI buttons manually
+            btnStartScan.setDisable(false);
+            btnStopScan.setDisable(true);
+            
+            // Hide progress section
+            progressSection.setVisible(false);
+            progressSection.setManaged(false);
+            
+            // Show results
             showResultsFromWs();
+            
+            // Set status
+            lblStatus.setText("✅ Completado");
         });
     }
     

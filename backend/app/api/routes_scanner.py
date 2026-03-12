@@ -116,15 +116,13 @@ def get_progress(scan_id: str) -> ScanProgress:
 
 @router.websocket("/ws/scan/{scan_id}")
 async def scan_progress(websocket: WebSocket, scan_id: str):
-    """WebSocket para progreso en tiempo real"""
     await websocket.accept()
     _active_connections.append(websocket)
-    
     try:
         while True:
             progress = _scan_progress.get(scan_id)
             if progress:
-                await websocket.send_text(json.dumps({
+                msg = {
                     "type": "progress",
                     "scan_id": scan_id,
                     "progress": progress.progress,
@@ -133,10 +131,24 @@ async def scan_progress(websocket: WebSocket, scan_id: str):
                     "current_dir": getattr(progress, 'current_dir', ''),
                     "parallel_workers": getattr(progress, 'parallel_workers', 0),
                     "timestamp": datetime.now().isoformat()
-                }))
-            await asyncio.sleep(0.5)  # Actualizar cada 500ms
+                }
+                # Override type for terminal states
+                if progress.status == ScanStatus.COMPLETED:
+                    msg["type"] = "completed"
+                    msg["progress"] = 100
+                elif progress.status == ScanStatus.FAILED:
+                    msg["type"] = "error"
+
+                await websocket.send_text(json.dumps(msg))
+
+                if progress.status in (ScanStatus.COMPLETED, ScanStatus.FAILED):
+                    await asyncio.sleep(1)   # give frontend time to process
+                    break
+            await asyncio.sleep(0.3)
     except WebSocketDisconnect:
-        logger.info(f"WebSocket desconectado para scan {scan_id}")
+        logger.info(f"WebSocket disconnected for scan {scan_id}")
+    except Exception as e:
+        logger.error(f"WebSocket error for scan {scan_id}: {e}")
     finally:
         if websocket in _active_connections:
             _active_connections.remove(websocket)

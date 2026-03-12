@@ -481,11 +481,7 @@ public class ApiClient {
             @Override
             public void onClosed(WebSocket webSocket, int code, String reason) {
                 System.out.println("WebSocket closed for scan: " + scanId);
-                Platform.runLater(() -> {
-                    if (wsOnComplete != null) {
-                        wsOnComplete.run();
-                    }
-                });
+                // Completion is handled by the "completed" message in onMessage(), not the close event
             }
             
             @Override
