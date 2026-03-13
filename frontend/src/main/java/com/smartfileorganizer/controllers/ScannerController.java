@@ -185,10 +185,24 @@ public class ScannerController implements Initializable {
             public String toString(Map<String, Object> drive) {
                 String name = (String) drive.get("name");
                 Long freeSpace = (Long) drive.get("free_space");
-                if (freeSpace != null) {
-                    return name + " (" + FormatUtils.formatFileSize(freeSpace) + " libre)";
+                Boolean isRemovable = (Boolean) drive.get("is_removable");
+                String filesystem = (String) drive.get("filesystem");
+                
+                StringBuilder display = new StringBuilder(name);
+                
+                if (isRemovable != null && isRemovable) {
+                    display.append(" (USB)");
                 }
-                return name;
+                
+                if (filesystem != null && !filesystem.isEmpty()) {
+                    display.append(" [").append(filesystem).append("]");
+                }
+                
+                if (freeSpace != null) {
+                    display.append(" (").append(FormatUtils.formatFileSize(freeSpace)).append(" libre)");
+                }
+                
+                return display.toString();
             }
 
             @Override
@@ -273,24 +287,33 @@ public class ScannerController implements Initializable {
                             String folderName = (String) folder.get("name");
                             Integer fileCount = (Integer) folder.get("file_count");
                             
+                            // Handle permission error folders
+                            String displayName = folderName;
+                            if (folderName.contains("(sin acceso)")) {
+                                displayName = folderName.replace("(sin acceso)", "(sin acceso)");
+                            }
+                            
                             PathItem pathItem = new PathItem(
-                                folderName + (fileCount != null ? " (" + fileCount + " archivos)" : ""),
+                                displayName + (fileCount != null ? " (" + fileCount + " archivos)" : ""),
                                 folderPath
                             );
                             
                             TreeItem<PathItem> folderItem = new TreeItem<>(pathItem);
                             folderItem.setExpanded(false);
                             
-                            // Placeholder para subcarpetas
-                            folderItem.getChildren().add(new TreeItem<>(new PathItem("Loading...", "")));
-                            
-                            // Listener para expandir subcarpetas
-                            folderItem.expandedProperty().addListener((obs, wasExpanded, isNowExpanded) -> {
-                                if (isNowExpanded && folderItem.getChildren().size() == 1 && 
-                                    folderItem.getChildren().get(0).getValue().toString().equals("Loading...")) {
-                                    loadSubFolders(folderItem, folderPath);
-                                }
-                            });
+                            // Only add placeholder if folder doesn't have permission error
+                            if (!folderName.contains("(sin acceso)")) {
+                                // Placeholder para subcarpetas
+                                folderItem.getChildren().add(new TreeItem<>(new PathItem("Loading...", "")));
+                                
+                                // Listener para expandir subcarpetas
+                                folderItem.expandedProperty().addListener((obs, wasExpanded, isNowExpanded) -> {
+                                    if (isNowExpanded && folderItem.getChildren().size() == 1 && 
+                                        folderItem.getChildren().get(0).getValue().toString().equals("Loading...")) {
+                                        loadSubFolders(folderItem, folderPath);
+                                    }
+                                });
+                            }
                             
                             rootItem.getChildren().add(folderItem);
                         }
@@ -300,7 +323,13 @@ public class ScannerController implements Initializable {
             } catch (Exception e) {
                 Platform.runLater(() -> {
                     rootItem.getChildren().clear();
-                    rootItem.setValue(new PathItem("Error: " + e.getMessage(), ""));
+                    // Check if it's a permission error
+                    String errorMessage = e.getMessage();
+                    if (errorMessage != null && errorMessage.contains("403")) {
+                        rootItem.setValue(new PathItem(rootPath + " (sin acceso)", rootPath));
+                    } else {
+                        rootItem.setValue(new PathItem("Error: " + e.getMessage(), ""));
+                    }
                 });
             }
         });

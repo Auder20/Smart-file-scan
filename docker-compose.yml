@@ -7,12 +7,8 @@ services:
       - "8000:8000"
     volumes:
       - ./backend:/app
-      # Montar directorios del host para escaneo
-      - C:\:/host/c  # Acceso completo a disco C:
-      - D:\:/host/d  # Acceso completo a disco D:
-      - C:\Users:/host/users  # Mantener compatibilidad con rutas existentes
-      - D:\Data:/host/data     # Mantener compatibilidad con rutas existentes
-      - /host/scans:/app/scans   # Directorio de trabajo para escaneos
+      # Montar todo el sistema de archivos del host como solo lectura
+      - /:/host:ro
     environment:
       - HOST_ROOT=/host
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
@@ -39,3 +35,5 @@ services:
 
 volumes:
   redis_data:
+
+# FOR DEVELOPMENT ONLY - end users run build-*.sh or build-win.bat

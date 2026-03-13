@@ -387,6 +387,12 @@ public class ApiClient {
                     m.put("total_space", o.get("total_space").getAsLong());
                 if (o.has("free_space") && !o.get("free_space").isJsonNull())
                     m.put("free_space", o.get("free_space").getAsLong());
+                if (o.has("used_space") && !o.get("used_space").isJsonNull())
+                    m.put("used_space", o.get("used_space").getAsLong());
+                if (o.has("filesystem") && !o.get("filesystem").isJsonNull())
+                    m.put("filesystem", safeString(o, "filesystem"));
+                if (o.has("is_removable"))
+                    m.put("is_removable", o.get("is_removable").getAsBoolean());
                 drives.add(m);
             }
             return drives;

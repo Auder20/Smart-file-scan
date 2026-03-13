@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import os
 import logging
-from typing import List, Optional
+import platform
+import ctypes
+from typing import List, Optional, Dict, Any
 from pathlib import Path
 
+import psutil
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
@@ -25,6 +28,81 @@ class AvailableDrive(BaseModel):
     path: str
     total_space: Optional[int] = None
     free_space: Optional[int] = None
+    used_space: Optional[int] = None
+    filesystem: Optional[str] = None
+    is_removable: bool = False
+
+
+def _is_hidden(entry: os.DirEntry) -> bool:
+    """Check if a file/directory is hidden on the current OS"""
+    if platform.system() == "Windows":
+        try:
+            # Use FILE_ATTRIBUTE_HIDDEN via ctypes
+            attrs = ctypes.windll.kernel32.GetFileAttributesW(entry.path)
+            return attrs != 0xFFFFFFFF and (attrs & 2)  # FILE_ATTRIBUTE_HIDDEN = 2
+        except:
+            return False
+    else:
+        # Linux/macOS: check for dot prefix
+        return entry.name.startswith('.')
+
+
+def _is_removable(partition: psutil._common.sdiskpart) -> bool:
+    """Check if a partition is removable (USB/external)"""
+    if platform.system() == "Windows":
+        try:
+            # On Windows, check if it's a removable drive
+            drive_letter = partition.device.split(':')[0]
+            drive_type = ctypes.windll.kernel32.GetDriveTypeW(f"{drive_letter}:\\")
+            return drive_type == 2  # DRIVE_REMOVABLE
+        except:
+            return False
+    else:
+        # Linux/macOS: use device name heuristics
+        device = partition.device.lower()
+        removable_indicators = ['usb', 'sd', 'mmc', 'external', 'removable']
+        return any(indicator in device for indicator in removable_indicators)
+
+
+def _is_blocked(path: str) -> bool:
+    """Check if a path is in the blocked system paths list"""
+    normalized_path = os.path.normpath(path).lower()
+    
+    if platform.system() == "Windows":
+        blocked = [
+            "c:\\windows\\system32",
+            "c:\\windows\\syswow64", 
+            "c:\\$recycle.bin",
+            "c:\\system volume information"
+        ]
+    elif platform.system() == "Linux":
+        blocked = ["/proc", "/sys", "/dev", "/run"]
+    else:  # macOS
+        blocked = ["/system", "/private/var/vm", "/dev"]
+    
+    return any(normalized_path.startswith(blocked.lower()) for blocked in blocked)
+
+
+def _resolve_path_for_docker(path: str) -> str:
+    """Translate real OS paths to /host/X paths for Docker mode"""
+    host_root = os.getenv("HOST_ROOT")
+    if not host_root:
+        # Native mode: return path unchanged
+        return path
+    
+    # Docker mode: translate to /host/X format
+    if platform.system() == "Windows":
+        # C:\Users\X -> /host/c/Users/X
+        if len(path) >= 2 and path[1] == ':':
+            drive = path[0].lower()
+            rest_path = path[2:].replace('\\', '/')
+            return f"{host_root}/{drive}{rest_path}"
+    else:
+        # Linux/macOS: /home/x -> /host/home/x
+        if path.startswith('/'):
+            return f"{host_root}{path}"
+    
+    return path
 
 
 @router.get("/drives")
@@ -32,43 +110,87 @@ def get_available_drives() -> List[AvailableDrive]:
     """Retorna las unidades/dispositivos disponibles para escanear"""
     
     drives = []
-    host_root = os.getenv("HOST_ROOT", "/host")
     
-    if os.path.exists(host_root):
-        # Listar directorios montados en /host
-        for item in os.listdir(host_root):
-            item_path = os.path.join(host_root, item)
-            if os.path.isdir(item_path):
-                try:
-                    stat = os.statvfs(item_path)
-                    total_space = stat.f_frsize * stat.f_blocks
-                    free_space = stat.f_frsize * stat.f_bavail
-                    
-                    drives.append(AvailableDrive(
-                        name=item.upper(),
-                        path=item_path,
-                        total_space=total_space,
-                        free_space=free_space
-                    ))
-                except Exception as e:
-                    logger.warning(f"No se puede obtener espacio de {item_path}: {e}")
-                    drives.append(AvailableDrive(
-                        name=item.upper(),
-                        path=item_path
-                    ))
+    # Blocklist of filesystem types to skip
+    SKIP_FSTYPES = {
+        "squashfs", "tmpfs", "devtmpfs", "overlay", "aufs",
+        "proc", "sysfs", "cgroup", "cgroup2", "pstore",
+        "bpf", "tracefs", "debugfs", "securityfs", "hugetlbfs",
+        "mqueue", "fusectl", "fuse.portal"
+    }
     
-    # Si no hay montajes, usar rutas por defecto
-    if not drives:
-        default_paths = [
-            ("Users", "/host/users"),
-            ("Data", "/host/data"),
-            ("Home", "/host/home"),
-            ("Temp", "/app/scans")
-        ]
+    try:
+        # Use psutil to detect all real drives/partitions
+        partitions = psutil.disk_partitions(all=False)
         
-        for name, path in default_paths:
+        # Deduplicate by device, keeping the most specific mountpoint
+        device_partitions = {}
+        for partition in partitions:
+            # Skip virtual filesystems and unwanted devices
+            if (partition.fstype in SKIP_FSTYPES or
+                partition.device.startswith('/dev/loop') or
+                partition.device.startswith('/dev/sr') or
+                partition.mountpoint.startswith('/snap') or
+                partition.mountpoint.startswith('/boot') or
+                partition.mountpoint.startswith('/sys') or
+                partition.mountpoint.startswith('/proc')):
+                continue
+            
+            device = partition.device
+            current_mountpoint = partition.mountpoint
+            
+            # Keep the partition with the longest/most specific mountpoint
+            if (device not in device_partitions or 
+                len(current_mountpoint) > len(device_partitions[device].mountpoint)):
+                device_partitions[device] = partition
+        
+        # Process deduplicated partitions
+        for partition in device_partitions.values():
+            try:
+                usage = psutil.disk_usage(partition.mountpoint)
+                
+                # Format display name using mountpoint, not device
+                display_name = partition.mountpoint
+                if partition.fstype:
+                    display_name += f" [{partition.fstype}]"
+                
+                drive = AvailableDrive(
+                    name=display_name,  # Use mountpoint as display name
+                    path=partition.mountpoint,
+                    total_space=usage.total,
+                    free_space=usage.free,
+                    used_space=usage.used,
+                    filesystem=partition.fstype,
+                    is_removable=_is_removable(partition)
+                )
+                drives.append(drive)
+                
+            except Exception as e:
+                logger.warning(f"Cannot get usage for {partition.mountpoint}: {e}")
+                # Still add drive with basic info
+                display_name = partition.mountpoint
+                if partition.fstype:
+                    display_name += f" [{partition.fstype}]"
+                
+                drive = AvailableDrive(
+                    name=display_name,  # Use mountpoint as display name
+                    path=partition.mountpoint,
+                    filesystem=partition.fstype,
+                    is_removable=_is_removable(partition)
+                )
+                drives.append(drive)
+                
+    except Exception as e:
+        logger.error(f"Error detecting drives: {e}")
+        # Fallback to basic root paths
+        if platform.system() == "Windows":
+            fallback_paths = ["C:\\", "D:\\"]
+        else:
+            fallback_paths = ["/"]
+        
+        for path in fallback_paths:
             if os.path.exists(path):
-                drives.append(AvailableDrive(name=name, path=path))
+                drives.append(AvailableDrive(name=path, path=path))
     
     return drives
 
@@ -76,145 +198,84 @@ def get_available_drives() -> List[AvailableDrive]:
 @router.get("/folders")
 def explore_folders(
     path: str = Query(..., description="Ruta a explorar"),
-    include_hidden: bool = Query(default=False),
-    max_depth: int = Query(default=3, ge=1, le=10)
+    include_hidden: bool = Query(default=False)
 ) -> List[FolderInfo]:
-    """Explora carpetas en una ruta específica"""
+    """Explora carpetas en una ruta específica usando os.scandir para速度快"""
     
-    # Validar que la ruta sea segura
-    host_root = os.getenv("HOST_ROOT", "/host")
-    if not path.startswith(host_root) and not path.startswith("/app/scans"):
-        raise HTTPException(400, detail="Ruta no permitida por seguridad")
+    # Resolve path for Docker mode if needed
+    resolved_path = _resolve_path_for_docker(path)
     
-    if not os.path.exists(path):
+    if not os.path.exists(resolved_path):
         raise HTTPException(404, detail=f"La ruta '{path}' no existe")
     
     folders = []
     
     try:
-        for item in os.listdir(path):
-            if not include_hidden and item.startswith('.'):
-                continue
-                
-            item_path = os.path.join(path, item)
-            
-            try:
-                is_dir = os.path.isdir(item_path)
-                
-                folder_info = FolderInfo(
-                    name=item,
-                    path=item_path,
-                    is_directory=is_dir
-                )
-                
-                if is_dir:
-                    # Contar archivos y calcular tamaño (con manejo de errores)
-                    file_count = 0
-                    total_size = 0
-                    try:
-                        for root, dirs, files in os.walk(item_path):
-                            # Limitar profundidad
-                            current_depth = root.replace(path, "").count(os.sep)
-                            if current_depth >= max_depth:
-                                dirs[:] = []  # No seguir explorando subdirectorios
-                                continue
-                            
-                            file_count += len(files)
-                            for file in files:
-                                try:
-                                    file_path = os.path.join(root, file)
-                                    total_size += os.path.getsize(file_path)
-                                except (OSError, PermissionError):
-                                    continue
-                    except (OSError, PermissionError):
-                        logger.debug(f"No se puede explorar completamente {item_path}")
-                        pass
-                    
-                    folder_info.file_count = file_count
-                    folder_info.size = total_size
-                else:
-                    try:
-                        folder_info.size = os.path.getsize(item_path)
-                    except (OSError, PermissionError):
-                        folder_info.size = 0
-                
-                folders.append(folder_info)
-                
-            except (OSError, PermissionError) as e:
-                logger.debug(f"Error accediendo a {item_path}: {e}")
-                # Aún así agregar la carpeta con información básica
-                try:
-                    is_dir = os.path.isdir(item_path)
-                    folders.append(FolderInfo(
-                        name=item + " (acceso limitado)",
-                        path=item_path,
-                        is_directory=is_dir
-                    ))
-                except:
+        with os.scandir(resolved_path) as entries:
+            for entry in entries:
+                if not include_hidden and _is_hidden(entry):
                     continue
                 
+                try:
+                    folder_info = FolderInfo(
+                        name=entry.name,
+                        path=path,  # Return original OS path, not resolved path
+                        is_directory=entry.is_dir()
+                    )
+                    
+                    if entry.is_dir():
+                        # Quick file count without deep recursion
+                        try:
+                            with os.scandir(entry.path) as sub_entries:
+                                file_count = len([e for e in sub_entries if e.is_file()])
+                            folder_info.file_count = file_count
+                        except (OSError, PermissionError):
+                            folder_info.file_count = 0
+                    else:
+                        try:
+                            folder_info.size = entry.stat().st_size
+                        except (OSError, PermissionError):
+                            folder_info.size = 0
+                    
+                    folders.append(folder_info)
+                    
+                except (OSError, PermissionError) as e:
+                    logger.debug(f"Error accessing {entry.path}: {e}")
+                    # Add with limited access label
+                    try:
+                        folders.append(FolderInfo(
+                            name=entry.name + " (sin acceso)",
+                            path=path,
+                            is_directory=entry.is_dir()
+                        ))
+                    except:
+                        continue
+                        
     except (OSError, PermissionError) as e:
         raise HTTPException(403, detail=f"No se puede acceder a la ruta: {e}")
     
-    # Ordenar: directorios primero, luego archivos, ambos por nombre
+    # Sort: directories first, then files, both by name
     folders.sort(key=lambda x: (not x.is_directory, x.name.lower()))
     
     return folders
-
-
-@router.get("/common-folders")
-def get_common_folders() -> List[FolderInfo]:
-    """Retorna carpetas comunes para escanear rápidamente"""
-    
-    host_root = os.getenv("HOST_ROOT", "/host")
-    common_folders = []
-    
-    # Carpetas típicas de Windows
-    common_paths = [
-        ("Documents", f"{host_root}/users/*/Documents"),
-        ("Downloads", f"{host_root}/users/*/Downloads"),
-        ("Desktop", f"{host_root}/users/*/Desktop"),
-        ("Pictures", f"{host_root}/users/*/Pictures"),
-        ("Videos", f"{host_root}/users/*/Videos"),
-        ("Music", f"{host_root}/users/*/Music"),
-        ("Projects", f"{host_root}/data/Projects"),
-        ("Work", f"{host_root}/data/Work"),
-    ]
-    
-    import glob
-    
-    for name, pattern in common_paths:
-        try:
-            matches = glob.glob(pattern)
-            for match in matches[:3]:  # Limitar a 3 coincidencias por tipo
-                if os.path.exists(match):
-                    file_count = len([f for f in os.listdir(match) 
-                                   if os.path.isfile(os.path.join(match, f))])
-                    
-                    common_folders.append(FolderInfo(
-                        name=f"{name} ({os.path.basename(os.path.dirname(match))})",
-                        path=match,
-                        is_directory=True,
-                        file_count=file_count
-                    ))
-        except Exception as e:
-            logger.warning(f"Error buscando {pattern}: {e}")
-    
-    return common_folders
 
 
 @router.get("/validate-path")
 def validate_scan_path(path: str = Query(...)) -> dict:
     """Valida si una ruta es apta para escaneo"""
     
-    host_root = os.getenv("HOST_ROOT", "/host")
-    
-    # Validaciones de seguridad
-    if not path.startswith(host_root) and not path.startswith("/app/scans"):
+    if not os.path.isabs(path):
         return {
             "valid": False,
-            "reason": "Ruta no permitida por seguridad",
-            "suggestion": "Usa rutas bajo /host/users o /host/data"
+            "reason": "La ruta debe ser absoluta",
+            "suggestion": "Usa rutas absolutas como C:\\Users o /home/user"
+        }
+    
+    if _is_blocked(path):
+        return {
+            "valid": False,
+            "reason": "Ruta del sistema bloqueada por seguridad",
+            "suggestion": "Selecciona carpetas de usuario o datos"
         }
     
     if not os.path.exists(path):
@@ -231,12 +292,8 @@ def validate_scan_path(path: str = Query(...)) -> dict:
             "suggestion": "Selecciona una carpeta, no un archivo"
         }
     
-    # Verificar permisos de lectura y escritura
-    readable = False
-    writable = False
-    
+    # Check read permissions
     try:
-        # Verificar si podemos leer el directorio
         os.listdir(path)
         readable = True
     except PermissionError:
@@ -246,45 +303,41 @@ def validate_scan_path(path: str = Query(...)) -> dict:
             "suggestion": "Selecciona una carpeta con permisos de lectura"
         }
     
+    # Check write permissions (optional for scanning)
     try:
-        # Verificar si podemos escribir (solo si es necesario para el escaneo)
         test_file = os.path.join(path, ".access_test")
         with open(test_file, 'w') as f:
             f.write("test")
         os.remove(test_file)
         writable = True
     except PermissionError:
-        # Algunas carpetas del sistema son de solo lectura, pero aún así se pueden escanear
-        logger.warning(f" Carpeta de solo lectura detectada: {path}")
         writable = False
     except Exception as e:
-        logger.warning(f"Error verificando escritura en {path}: {e}")
+        logger.warning(f"Error checking write permissions for {path}: {e}")
         writable = False
     
-    # Si al menos podemos leer, permitir escaneo con advertencia
-    if readable:
-        try:
-            # Contar archivos estimados (con manejo de errores de permisos)
-            file_count = 0
-            for root, dirs, files in os.walk(path):
-                try:
-                    file_count += len(files)
-                except PermissionError:
-                    continue  # Saltar carpetas sin permisos
-            
-            message = "Ruta válida para escaneo" if writable else "Ruta de solo lectura (escaneo limitado)"
-            
-            return {
-                "valid": True,
-                "estimated_files": file_count,
-                "readable": readable,
-                "writable": writable,
-                "message": message,
-                "warning": None if writable else "Algunas funciones pueden estar limitadas en carpetas de solo lectura"
-            }
-        except Exception as e:
-            return {
-                "valid": False,
-                "reason": f"Error analizando la carpeta: {str(e)}",
-                "suggestion": "Intenta con otra carpeta"
-            }
+    # Quick file count estimation
+    try:
+        file_count = 0
+        for root, dirs, files in os.walk(path):
+            try:
+                file_count += len(files)
+            except PermissionError:
+                continue
+        
+        message = "Ruta válida para escaneo" if writable else "Ruta de solo lectura (escaneo limitado)"
+        
+        return {
+            "valid": True,
+            "estimated_files": file_count,
+            "readable": readable,
+            "writable": writable,
+            "message": message,
+            "warning": None if writable else "Algunas funciones pueden estar limitadas en carpetas de solo lectura"
+        }
+    except Exception as e:
+        return {
+            "valid": False,
+            "reason": f"Error analizando la carpeta: {str(e)}",
+            "suggestion": "Intenta con otra carpeta"
+        }
