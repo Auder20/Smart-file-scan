@@ -15,15 +15,13 @@ from app.models.file_info import ScanRequest, ScanResult, ScanStatus, ScanProgre
 from app.core.scanner import scan_directory
 from app.models.file_info import FileInfo
 from app.db.database import save_scan_metadata, save_file_batch, get_scan
+from app.core.scan_store import scan_store  # ARCH 2: Import centralized scan store
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/scan", tags=["scanner"])
 
 # WebSocket connections for real-time progress
 _active_connections: list[WebSocket] = []
-
-_scan_results:  dict[str, ScanResult]   = {}
-_scan_progress: dict[str, ScanProgress] = {}
 
 # Global event loop reference for WebSocket communication from threads
 _event_loop: asyncio.AbstractEventLoop = None
@@ -49,22 +47,25 @@ def _notify_ws(data: dict) -> None:
 @router.post("", status_code=202)
 def start_scan(request: ScanRequest) -> dict:
     scan_id = str(uuid.uuid4())[:8]
-    _scan_progress[scan_id] = ScanProgress(
+    # ARCH 2: Use scan_store instead of global variables
+    scan_store.set_scan_progress(scan_id, ScanProgress(
         scan_id     = scan_id,
         status      = ScanStatus.PENDING,
         progress    = 0,
         files_found = 0,
         message     = "Iniciando escaneo...",
-    )
+    ))
     Thread(target=_run_scan, args=(scan_id, request), daemon=True).start()
     return {"scan_id": scan_id, "status": "accepted"}
 
 
 @router.get("")
 def list_scans() -> list[dict]:
+    # ARCH 2: Use scan_store
+    all_progress = scan_store.get_all_scan_progress()
     return [
         {"scan_id": sid, "status": p.status, "files_found": p.files_found}
-        for sid, p in _scan_progress.items()
+        for sid, p in all_progress.items()
     ]
 
 
@@ -75,40 +76,14 @@ def list_scans() -> list[dict]:
 @router.get("/all")
 def list_all_scans() -> list[dict]:
     """Returns all scans with full info including completed results."""
-    all_scans = []
-
-    for sid, progress in _scan_progress.items():
-        scan_info: dict = {
-            "scan_id":      sid,
-            "status":       progress.status,
-            "files_found":  progress.files_found,
-            "progress":     progress.progress,
-            "message":      progress.message,
-            "root_path":    None,
-            "total_files":  0,
-            "total_size":   0,
-            "scanned_at":   None,
-            "duration_sec": 0.0,
-        }
-
-        if progress.status == ScanStatus.COMPLETED and sid in _scan_results:
-            r = _scan_results[sid]
-            scan_info.update({
-                "root_path":    r.root_path,
-                "total_files":  r.total_files,
-                "total_size":   r.total_size,
-                "scanned_at":   r.scanned_at.isoformat(),
-                "duration_sec": r.duration_sec,
-            })
-
-        all_scans.append(scan_info)
-
-    return sorted(all_scans, key=lambda x: x.get("scanned_at") or "", reverse=True)
+    # ARCH 2: Use scan_store
+    return scan_store.get_all_scans_info()
 
 
 @router.get("/{scan_id}/progress")
 def get_progress(scan_id: str) -> ScanProgress:
-    p = _scan_progress.get(scan_id)
+    # ARCH 2: Use scan_store
+    p = scan_store.get_scan_progress(scan_id)
     if not p:
         raise HTTPException(404, detail=f"Scan '{scan_id}' no encontrado")
     return p
@@ -120,7 +95,7 @@ async def scan_progress(websocket: WebSocket, scan_id: str):
     _active_connections.append(websocket)
     try:
         while True:
-            progress = _scan_progress.get(scan_id)
+            progress = scan_store.get_scan_progress(scan_id)
             if progress:
                 msg = {
                     "type": "progress",
@@ -154,11 +129,55 @@ async def scan_progress(websocket: WebSocket, scan_id: str):
             _active_connections.remove(websocket)
 
 
+@router.get("/{scan_id}/files")
+def get_scan_files(scan_id: str, page: int = 1, page_size: int = 1000) -> dict:
+    """FEAT 3: Get all files for a scan with pagination for rehydration"""
+    # ARCH 2: Use scan_store instead of importing from routes_scanner
+    result = scan_store.get_scan_result(scan_id)
+    if not result:
+        p = scan_store.get_scan_progress(scan_id)
+        if p:
+            raise HTTPException(409, detail=f"Scan en progreso ({p.progress}%)")
+        raise HTTPException(404, detail=f"Scan '{scan_id}' no encontrado")
+    
+    # If files are not truncated, return from memory
+    if not result.files_truncated:
+        return {
+            "scan_id": scan_id,
+            "files": [file.dict() for file in result.files],
+            "total_files": len(result.files),
+            "page": 1,
+            "page_size": len(result.files),
+            "total_pages": 1,
+            "files_truncated": False
+        }
+    
+    # If files are truncated, load from SQLite with pagination
+    logger.info(f"Loading files from SQLite for truncated scan {scan_id}, page {page}")
+    try:
+        paginated_result = get_files_paginated(scan_id, page, page_size)
+        
+        return {
+            "scan_id": scan_id,
+            "files": paginated_result["files"],
+            "total_files": paginated_result["total_files"],
+            "page": page,
+            "page_size": page_size,
+            "total_pages": paginated_result["total_pages"],
+            "files_truncated": True
+        }
+        
+    except Exception as e:
+        logger.error(f"Error loading files from SQLite: {e}")
+        raise HTTPException(500, detail=f"Error cargando archivos: {str(e)}")
+
+
 @router.get("/{scan_id}")
 def get_result(scan_id: str) -> ScanResult:
-    result = _scan_results.get(scan_id)
+    # ARCH 2: Use scan_store instead of importing from routes_scanner
+    result = scan_store.get_scan_result(scan_id)
     if not result:
-        p = _scan_progress.get(scan_id)
+        p = scan_store.get_scan_progress(scan_id)
         if p:
             raise HTTPException(409, detail=f"Scan en progreso ({p.progress}%)")
         raise HTTPException(404, detail=f"Scan '{scan_id}' no encontrado")
@@ -172,8 +191,8 @@ def delete_scan(scan_id: str) -> dict:
         _scan_cancel_events[scan_id].set()
         del _scan_cancel_events[scan_id]
     
-    _scan_results.pop(scan_id, None)
-    _scan_progress.pop(scan_id, None)
+    # ARCH 2: Use scan_store
+    scan_store.remove_scan(scan_id)
     return {"message": f"Scan {scan_id} eliminado correctamente"}
 
 
@@ -186,7 +205,11 @@ def _run_scan(scan_id: str, request: ScanRequest) -> None:
     cancel_event = Event()
     _scan_cancel_events[scan_id] = cancel_event
 
-    progress         = _scan_progress[scan_id]
+    progress = scan_store.get_scan_progress(scan_id)
+    if not progress:
+        logger.error(f"Scan {scan_id} not found in progress store")
+        return
+    
     progress.status  = ScanStatus.RUNNING
     progress.message = "Escaneando..."
     files: list[FileInfo] = []
@@ -271,8 +294,8 @@ def _run_scan(scan_id: str, request: ScanRequest) -> None:
         except Exception as e:
             logger.error(f"Failed to update scan metadata: {e}")
         
-        # Keep light reference in memory for compatibility
-        _scan_results[scan_id] = ScanResult(
+        # ARCH 2: Keep light reference in memory for compatibility
+        scan_store.set_scan_result(scan_id, ScanResult(
             scan_id      = scan_id,
             root_path    = request.path,
             status       = ScanStatus.COMPLETED,
@@ -281,7 +304,8 @@ def _run_scan(scan_id: str, request: ScanRequest) -> None:
             files        = files[:1000],  # Keep only first 1000 files in memory
             scanned_at   = datetime.now(),
             duration_sec = duration,
-        )
+            files_truncated = len(files) > 1000  # Indicar si los archivos están truncados
+        ))
         
         progress.status  = ScanStatus.COMPLETED
         progress.progress    = 100

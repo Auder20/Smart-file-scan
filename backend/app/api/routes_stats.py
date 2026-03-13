@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.core.stats import compute_stats, StatsResult as StatsInternal
-from app.api.routes_scanner import _scan_results
+from app.core.scan_store import scan_store  # ARCH 2: Import centralized scan store
 
 router = APIRouter(prefix="/api/stats", tags=["stats"])
 
@@ -28,7 +28,8 @@ class StatsResponse(BaseModel):
 
 @router.get("/{scan_id}")
 def get_stats(scan_id: str) -> StatsResponse:
-    result = _scan_results.get(scan_id)
+    # ARCH 2: Use scan_store instead of importing from routes_scanner
+    result = scan_store.get_scan_result(scan_id)
     if not result:
         raise HTTPException(404, detail=f"Scan '{scan_id}' no encontrado")
 

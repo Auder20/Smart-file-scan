@@ -101,9 +101,13 @@ def scan_directory_parallel(request: ScanRequest) -> Generator:
                 dir_path = future_to_dir[future]
                 if dir_path not in processed_dirs:
                     try:
-                        count = future.result()
+                        count, files = future.result()  
                         total_count += count
                         processed_dirs.add(dir_path)
+                        
+                        # Hacer yield de cada FileInfo encontrado
+                        for file_info in files:
+                            yield file_info
                         
                         # Encontrar más directorios para procesar
                         if len(processed_dirs) < len(main_dirs):
@@ -128,9 +132,10 @@ def scan_directory_parallel(request: ScanRequest) -> Generator:
         yield {"type": "done", "count": total_count}
 
 
-def _scan_single_directory(dir_path: str, request: ScanRequest, exclude: set) -> int:
+def _scan_single_directory(dir_path: str, request: ScanRequest, exclude: set) -> tuple[int, list[FileInfo]]:
     """Escanea un solo directorio (usado por workers paralelos)"""
     count = 0
+    files = []
     max_depth = request.max_depth
     stack: list[tuple[str, int]] = [(dir_path, 0)]
     
@@ -160,6 +165,7 @@ def _scan_single_directory(dir_path: str, request: ScanRequest, exclude: set) ->
                         file_info = _build_file_info(entry)
                         if file_info is not None:
                             count += 1
+                            files.append(file_info)  # FIX: Acumular archivos para yield después
                     elif is_dir:
                         subdirs.append((entry.path, depth + 1))
                 
@@ -167,7 +173,7 @@ def _scan_single_directory(dir_path: str, request: ScanRequest, exclude: set) ->
         except (PermissionError, OSError) as e:
             logger.debug(f"Error en {current_dir}: {e}")
     
-    return count
+    return count, files
 
 
 def scan_directory(request: ScanRequest) -> Generator:
@@ -281,7 +287,7 @@ def cache_scan_results(path: str, max_depth: int, files: list[FileInfo]):
                 'timestamp': datetime.now().isoformat(),
                 'total_files': len(files)
             }
-            redis_client.setex(cache_key, json.dumps(cache_data), 3600)  # 1 hora cache
+            redis_client.setex(cache_key, 3600, json.dumps(cache_data))  # FIX: Argumentos correctos: key, ttl, value
             logger.info(f"Resultados cacheados para {path} ({len(files)} archivos)")
         except Exception as e:
             logger.error(f"Error cacheando resultados: {e}")

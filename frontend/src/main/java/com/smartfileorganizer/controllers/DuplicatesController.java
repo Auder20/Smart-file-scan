@@ -43,6 +43,7 @@ public class DuplicatesController implements Initializable {
     // ── Filters + actions ─────────────────────────────────────────────────────
     @FXML private TextField        txtFilter;
     @FXML private ComboBox<String> comboSizeFilter;
+    @FXML private ComboBox<String> comboCategoryFilter;  // FEAT 4: Category filter
     @FXML private CheckBox         chkShowOnlyLarge;
     @FXML private Button           btnSelectAll;
     @FXML private Button           btnDeselectAll;
@@ -130,14 +131,22 @@ public class DuplicatesController implements Initializable {
         ));
         comboSizeFilter.getSelectionModel().selectFirst();
 
+        // FEAT 4: Setup category filter
+        comboCategoryFilter.setItems(FXCollections.observableArrayList(
+            "Todas", "Documentos", "Imágenes", "Videos", "Audio", "Código", "Otros"
+        ));
+        comboCategoryFilter.getSelectionModel().selectFirst();
+
         txtFilter.textProperty().addListener((obs, o, n) -> applyFilters());
         comboSizeFilter.getSelectionModel().selectedItemProperty().addListener((obs, o, n) -> applyFilters());
+        comboCategoryFilter.getSelectionModel().selectedItemProperty().addListener((obs, o, n) -> applyFilters());  // FEAT 4
         chkShowOnlyLarge.selectedProperty().addListener((obs, o, n) -> applyFilters());
     }
 
     private void applyFilters() {
         String text      = txtFilter.getText().toLowerCase().trim();
         String sizeRange = comboSizeFilter.getSelectionModel().getSelectedItem();
+        String category  = comboCategoryFilter.getSelectionModel().getSelectedItem();  // FEAT 4
         boolean onlyLarge = chkShowOnlyLarge.isSelected();
 
         filteredDuplicates.setPredicate(file -> {
@@ -156,10 +165,36 @@ public class DuplicatesController implements Initializable {
                 }
             }
 
+            // FEAT 4: Category filter
+            if (category != null && !"Todas".equals(category)) {
+                String fileCategory = getFileCategory(file.getFileName());
+                if (!category.equalsIgnoreCase(fileCategory)) {
+                    return false;
+                }
+            }
+
             if (onlyLarge && file.getSizeBytes() < 10_485_760) return false;
 
             return true;
         });
+    }
+
+    // FEAT 4: Helper method to get file category based on extension
+    private String getFileCategory(String fileName) {
+        String extension = "";
+        int lastDot = fileName.lastIndexOf('.');
+        if (lastDot > 0) {
+            extension = fileName.substring(lastDot + 1).toLowerCase();
+        }
+
+        return switch (extension) {
+            case "txt", "doc", "docx", "pdf", "rtf", "odt" -> "Documentos";
+            case "jpg", "jpeg", "png", "gif", "bmp", "svg", "webp", "ico" -> "Imágenes";
+            case "mp4", "avi", "mkv", "mov", "wmv", "flv", "webm", "mpg" -> "Videos";
+            case "mp3", "wav", "flac", "aac", "ogg", "wma", "m4a" -> "Audio";
+            case "java", "py", "js", "cpp", "c", "h", "cs", "php", "rb", "go", "rs", "swift", "kt", "ts", "html", "css", "xml", "json", "yaml", "yml" -> "Código";
+            default -> "Otros";
+        };
     }
 
     // ── Load scans ────────────────────────────────────────────────────────────
@@ -306,10 +341,11 @@ public class DuplicatesController implements Initializable {
     }
 
     private void updateDeleteButton() {
-        long count = duplicateList.stream().filter(DuplicateFile::isSelected).count();
+        // FIX: Count only over filtered duplicates to match selectAll behavior
+        long count = filteredDuplicates.stream().filter(DuplicateFile::isSelected).count();
         btnDeleteSelected.setDisable(count == 0);
         if (count > 0) {
-            long size = duplicateList.stream()
+            long size = filteredDuplicates.stream()
                 .filter(DuplicateFile::isSelected)
                 .mapToLong(DuplicateFile::getSizeBytes).sum();
             btnDeleteSelected.setText("🗑️ Eliminar " + count + " (" + FormatUtils.formatFileSize(size) + ")");

@@ -11,6 +11,14 @@ import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.animation.FadeTransition;
 import javafx.util.Duration;
+import javafx.fxml.FXMLLoader;
+import javafx.scene.Parent;
+import javafx.scene.Scene;
+import javafx.stage.Modality;
+import javafx.stage.Stage;
+import javafx.stage.StageStyle;
+
+import java.io.IOException;
 
 public class UIUtils {
     
@@ -159,6 +167,33 @@ public class UIUtils {
                     // This is a simplified approach - in production, store original text
                     button.setText("Actualizar");
                 }
+            }
+        });
+    }
+    
+    // FEAT 1: Show files view dialog
+    public static void showFilesView(String scanId, String status) {
+        Platform.runLater(() -> {
+            try {
+                FXMLLoader loader = new FXMLLoader(
+                    UIUtils.class.getResource("/fxml/files_view.fxml")
+                );
+                Parent root = loader.load();
+                
+                com.smartfileorganizer.controllers.FilesViewController controller = loader.getController();
+                controller.setScanId(scanId);
+                
+                Stage stage = new Stage();
+                stage.setTitle("Archivos del Scan: " + scanId);
+                stage.setScene(new Scene(root, 1000, 700));
+                stage.initModality(Modality.APPLICATION_MODAL);
+                stage.setResizable(true);
+                stage.showAndWait();
+                
+            } catch (IOException e) {
+                showErrorDialog("Error", "No se pudo abrir la vista de archivos: " + e.getMessage());
+            } catch (Exception e) {
+                showErrorDialog("Error", "Error inesperado: " + e.getMessage());
             }
         });
     }

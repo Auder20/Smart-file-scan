@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+<?import javafx.geometry.Insets?>
+
+<VBox xmlns="http://javafx.com/javafx/17" xmlns:fx="http://javafx.com/fxml/1" 
+      fx:controller="com.smartfileorganizer.controllers.FilesViewController"
+      spacing="10" style="-fx-padding: 20;">
+    
+    <children>
+        <!-- Header with scan info -->
+        <HBox spacing="10" alignment="CENTER_LEFT">
+            <children>
+                <Label fx:id="lblScanInfo" text="Información del scan" 
+                       style="-fx-font-weight: bold; -fx-font-size: 14px;"/>
+                <Region HBox.hgrow="ALWAYS"/>
+                <ProgressBar fx:id="progressBar" visible="false" prefWidth="200"/>
+            </children>
+        </HBox>
+        
+        <!-- Filters -->
+        <HBox spacing="15" alignment="CENTER_LEFT">
+            <children>
+                <TextField fx:id="txtSearch" promptText="Buscar archivos..." prefWidth="300"/>
+                <ComboBox fx:id="cmbCategory" prefWidth="150"/>
+                <Button text="Limpiar filtros" onAction="#clearFilters"/>
+            </children>
+        </HBox>
+        
+        <!-- Stats -->
+        <HBox spacing="20" alignment="CENTER_LEFT">
+            <children>
+                <Label fx:id="lblTotalFiles" text="Archivos: 0" 
+                       style="-fx-font-weight: bold;"/>
+                <Label fx:id="lblTotalSize" text="Tamaño total: 0 B" 
+                       style="-fx-font-weight: bold;"/>
+            </children>
+        </HBox>
+        
+        <!-- Files table -->
+        <TableView fx:id="filesTable" VBox.vgrow="ALWAYS" prefHeight="400">
+            <columns>
+                <TableColumn fx:id="colName" text="Nombre" prefWidth="200"/>
+                <TableColumn fx:id="colPath" text="Ruta" prefWidth="300"/>
+                <TableColumn fx:id="colSize" text="Tamaño" prefWidth="100"/>
+                <TableColumn fx:id="colExtension" text="Extensión" prefWidth="80"/>
+                <TableColumn fx:id="colCategory" text="Categoría" prefWidth="100"/>
+                <TableColumn fx:id="colModified" text="Modificado" prefWidth="150"/>
+            </columns>
+        </TableView>
+        
+        <!-- Actions -->
+        <HBox spacing="10" alignment="CENTER_RIGHT">
+            <children>
+                <Button text="Exportar CSV" onAction="#exportCsv"/>
+                <Button text="Exportar JSON" onAction="#exportJson"/>
+                <Button text="Cerrar" onAction="#close"/>
+            </children>
+        </HBox>
+    </children>
+</VBox>

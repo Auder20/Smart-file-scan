@@ -3,6 +3,7 @@ D:\smart-file-organizer\frontend\src\main\java\com\smartfileorganizer\Main.java
 D:\smart-file-organizer\frontend\src\main\java\com\smartfileorganizer\controllers\StatsController.java
 D:\smart-file-organizer\frontend\src\main\java\com\smartfileorganizer\models\DuplicateGroup.java
 D:\smart-file-organizer\frontend\src\main\java\com\smartfileorganizer\models\ScanInfo.java
+D:\smart-file-organizer\frontend\src\main\java\com\smartfileorganizer\controllers\FilesViewController.java
 D:\smart-file-organizer\frontend\src\main\java\com\smartfileorganizer\controllers\DashboardController.java
 D:\smart-file-organizer\frontend\src\main\java\com\smartfileorganizer\controllers\MainController.java
 D:\smart-file-organizer\frontend\src\main\java\com\smartfileorganizer\models\DuplicateFile.java

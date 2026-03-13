@@ -8,7 +8,8 @@ from pydantic import BaseModel, Field
 
 from app.models.file_info import DuplicateGroup
 from app.core.hasher import find_duplicates
-from app.api.routes_scanner import _scan_results
+from app.core.scan_store import scan_store
+from app.db.database import get_files_paginated, get_scan, get_db_cursor
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/duplicates", tags=["duplicates"])
@@ -37,11 +38,27 @@ class DeleteResult(BaseModel):
 
 @router.get("/{scan_id}")
 def get_duplicates(scan_id: str) -> DuplicatesResult:
-    result = _scan_results.get(scan_id)
+    # ARCH 2: Use scan_store instead of importing from routes_scanner
+    result = scan_store.get_scan_result(scan_id)
     if not result:
         raise HTTPException(404, detail=f"Scan '{scan_id}' no encontrado")
 
-    groups = find_duplicates(result.files)
+    # FIX: Usar SQLite si los archivos están truncados
+    files = result.files
+    if result.files_truncated:
+        logger.info(f"Loading files from SQLite for truncated scan {scan_id}")
+        # Cargar todos los archivos desde SQLite en lotes
+        all_files = []
+        page = 1
+        while True:
+            paginated_result = get_files_paginated(scan_id, page, page_size=1000)
+            all_files.extend(paginated_result['files'])
+            if page >= paginated_result['total_pages']:
+                break
+            page += 1
+        files = all_files
+
+    groups = find_duplicates(files)
     total_wasted = sum(g.wasted_size for g in groups)
     total_duplicates = sum(len(g.duplicates) for g in groups)
 
@@ -87,6 +104,20 @@ def get_duplicates(scan_id: str) -> DuplicatesResult:
     )
 
 
+def _is_path_from_registered_scan(path: str) -> bool:
+    """FIX: Verifica si una ruta pertenece a algún scan registrado en SQLite"""
+    try:
+        with get_db_cursor() as cursor:
+            cursor.execute("""
+                SELECT COUNT(*) FROM scan_files 
+                WHERE path = ?
+            """, (path,))
+            return cursor.fetchone()[0] > 0
+    except Exception as e:
+        logger.error(f"Error verificando ruta {path}: {e}")
+        return False
+
+
 @router.delete("/files")
 def delete_files(request: DeleteRequest) -> DeleteResult:
     deleted     = []
@@ -95,6 +126,12 @@ def delete_files(request: DeleteRequest) -> DeleteResult:
 
     for path in request.paths:
         if not os.path.isfile(path):
+            failed.append(path)
+            continue
+
+        # FIX: Validar que la ruta pertenezca a algún scan registrado
+        if not _is_path_from_registered_scan(path):
+            logger.warning(f"Ruta no pertenece a ningún scan registrado: {path}")
             failed.append(path)
             continue
 

@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from app.models.file_info import FileInfo
-from app.api.routes_scanner import _scan_results
+from app.core.scan_store import scan_store  # ARCH 2: Use centralized scan store instead of _scan_results
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/files", tags=["files"])
@@ -44,7 +44,7 @@ def list_files(
 ) -> FilesListResponse:
     """Lista archivos de un escaneo con paginación y filtros"""
     
-    result = _scan_results.get(scan_id)
+    result = scan_store.get_scan_result(scan_id)  # ARCH 2: Use scan_store instead of _scan_results
     if not result:
         raise HTTPException(404, detail=f"Scan '{scan_id}' no encontrado")
     
@@ -107,7 +107,7 @@ def get_largest_files(
 ) -> list[FileInfoResponse]:
     """Retorna los archivos más grandes de un escaneo"""
     
-    result = _scan_results.get(scan_id)
+    result = scan_store.get_scan_result(scan_id)  # ARCH 2: Use scan_store instead of _scan_results
     if not result:
         raise HTTPException(404, detail=f"Scan '{scan_id}' no encontrado")
     
@@ -133,7 +133,7 @@ def get_largest_files(
 def get_extension_stats(scan_id: str) -> list[dict]:
     """Retorna estadísticas de extensiones de un escaneo"""
     
-    result = _scan_results.get(scan_id)
+    result = scan_store.get_scan_result(scan_id)  # ARCH 2: Use scan_store instead of _scan_results
     if not result:
         raise HTTPException(404, detail=f"Scan '{scan_id}' no encontrado")
     
@@ -170,7 +170,7 @@ def get_extension_stats(scan_id: str) -> list[dict]:
 def get_category_stats(scan_id: str) -> list[dict]:
     """Retorna estadísticas por categoría de un escaneo"""
     
-    result = _scan_results.get(scan_id)
+    result = scan_store.get_scan_result(scan_id)  # ARCH 2: Use scan_store instead of _scan_results
     if not result:
         raise HTTPException(404, detail=f"Scan '{scan_id}' no encontrado")
     

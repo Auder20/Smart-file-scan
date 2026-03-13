@@ -17,6 +17,92 @@ _CHUNK_SIZE   = 8 * 1024   # 8KB por chunk al leer archivos grandes
 _PARTIAL_SIZE = 4 * 1024   # 4KB para el hash de pre-filtrado
 
 
+def find_duplicates_from_sqlite(
+    scan_id: str,
+    progress_callback: Optional[Callable[[int, int], None]] = None,
+    max_files: int = 30_000,
+    chunk_size: int = 5000,
+) -> list[DuplicateGroup]:
+    """FEAT 5: Find duplicates by processing files in chunks from SQLite"""
+    from app.db.database import get_files_paginated
+    
+    logger.info(f"Finding duplicates for scan {scan_id} using SQLite chunk processing")
+    
+    # Get total file count first
+    first_page = get_files_paginated(scan_id, 1, 1)
+    total_files = first_page['total_files']
+    
+    if total_files < 2:
+        return []
+    
+    # If too many files, warn and limit
+    if total_files > max_files:
+        logger.warning(f"Too many files ({total_files:,}), limiting to {max_files:,}")
+        total_files = max_files
+    
+    # Process files in chunks to avoid memory issues
+    all_files = []
+    processed_files = 0
+    
+    page = 1
+    while processed_files < total_files:
+        # Get chunk of files from SQLite
+        actual_chunk_size = min(chunk_size, total_files - processed_files)
+        paginated_result = get_files_paginated(scan_id, page, actual_chunk_size)
+        
+        # Convert dict to FileInfo objects
+        chunk_files = []
+        for file_data in paginated_result['files']:
+            file_info = FileInfo(
+                name=file_data['name'],
+                path=file_data['path'],
+                size=file_data['size'],
+                extension=file_data.get('extension', ''),
+                category=file_data.get('category', ''),
+                modified=file_data.get('modified', '')
+            )
+            chunk_files.append(file_info)
+        
+        # Process chunk for duplicates
+        chunk_duplicates = _find_duplicates_in_chunk(chunk_files, progress_callback)
+        all_files.extend(chunk_files)
+        
+        processed_files += len(chunk_files)
+        page += 1
+        
+        if progress_callback:
+            progress_callback(processed_files, total_files)
+        
+        logger.debug(f"Processed chunk {page-1}: {len(chunk_files)} files, total: {processed_files}")
+    
+    # Now find duplicates across all processed files
+    return find_duplicates(all_files, progress_callback, max_files)
+
+
+def _find_duplicates_in_chunk(
+    files: list[FileInfo],
+    progress_callback: Optional[Callable[[int, int], None]] = None,
+) -> list[FileInfo]:
+    """Process a chunk of files to identify potential duplicates by size"""
+    if len(files) < 2:
+        return files
+    
+    # Group by size - only keep files that have size duplicates
+    by_size: dict[int, list[FileInfo]] = defaultdict(list)
+    for f in files:
+        if f.size > 0:
+            by_size[f.size].append(f)
+    
+    # Keep only files that have potential duplicates by size
+    candidates = []
+    for size, size_group in by_size.items():
+        if len(size_group) >= 2:
+            candidates.extend(size_group)
+    
+    logger.debug(f"Chunk processing: {len(files)} files -> {len(candidates)} potential duplicates")
+    return candidates
+
+
 def find_duplicates(
     files: list[FileInfo],
     progress_callback: Optional[Callable[[int, int], None]] = None,

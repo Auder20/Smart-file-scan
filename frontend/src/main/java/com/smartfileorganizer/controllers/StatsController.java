@@ -13,6 +13,7 @@ import javafx.scene.chart.PieChart;
 import javafx.scene.control.*;
 import javafx.scene.control.cell.PropertyValueFactory;
 import javafx.scene.layout.VBox;
+import javafx.scene.control.ChoiceDialog;
 
 import java.net.URL;
 import java.util.*;
@@ -317,35 +318,44 @@ public class StatsController implements Initializable {
         String scanId = comboScanId.getSelectionModel().getSelectedItem();
         if (scanId == null) { showAlert("Info", "Selecciona un escaneo primero."); return; }
 
-        showProgress(true, "Preparando exportación...");
+        // FEAT 2: Show export format selection dialog
+        ChoiceDialog<String> formatDialog = new ChoiceDialog<>("CSV", "CSV", "JSON", "TXT");
+        formatDialog.setTitle("Exportar Estadísticas");
+        formatDialog.setHeaderText("Selecciona el formato de exportación:");
+        formatDialog.setContentText("Formato:");
+
+        Optional<String> result = formatDialog.showAndWait();
+        if (result.isPresent()) {
+            String format = result.get();
+            exportStats(scanId, format);
+        }
+    }
+
+    private void exportStats(String scanId, String format) {
+        showProgress(true, "Preparando exportación " + format + "...");
 
         CompletableFuture.runAsync(() -> {
             try {
-                StringBuilder sb = new StringBuilder();
-                sb.append("Smart File Organizer — Estadísticas\n");
-                sb.append("Escaneo: ").append(scanId).append("\n\n");
-                sb.append("CATEGORÍAS:\n");
-                for (CategoryStats c : categoryList) {
-                    sb.append(String.format("  %-12s  %d archivos  %s  (%.1f%%)\n",
-                        c.getCategory(), c.getFileCount(),
-                        FormatUtils.formatFileSize(c.getTotalSize()), c.getPercentage()));
+                java.nio.file.Path outFile = null;
+                
+                switch (format.toUpperCase()) {
+                    case "CSV":
+                        outFile = exportToCsv(scanId);
+                        break;
+                    case "JSON":
+                        outFile = exportToJson(scanId);
+                        break;
+                    case "TXT":
+                    default:
+                        outFile = exportToText(scanId);
+                        break;
                 }
-                sb.append("\nARCHIVOS MÁS GRANDES:\n");
-                for (LargeFile f : largeFilesList) {
-                    sb.append(String.format("  %2d. %-40s  %s\n",
-                        f.getRank(), f.getFileName(), f.getFormattedSize()));
-                }
-                sb.append("\nEXTENSIONES:\n");
-                for (String ext : extensionsList) sb.append("  ").append(ext).append("\n");
 
-                // Write to temp file
-                java.nio.file.Path out = java.nio.file.Files.createTempFile(
-                    "sfo_stats_" + scanId + "_", ".txt");
-                java.nio.file.Files.writeString(out, sb.toString());
-
+                final java.nio.file.Path finalOutFile = outFile;
                 Platform.runLater(() -> {
                     showProgress(false, "");
-                    showAlert("Exportación completada", "Archivo guardado en:\n" + out.toString());
+                    showAlert("Exportación completada", 
+                        "Archivo guardado en:\n" + finalOutFile.toString());
                 });
 
             } catch (Exception e) {
@@ -355,6 +365,133 @@ public class StatsController implements Initializable {
                 });
             }
         });
+    }
+
+    private java.nio.file.Path exportToCsv(String scanId) throws Exception {
+        java.nio.file.Path outFile = java.nio.file.Files.createTempFile(
+            "sfo_stats_" + scanId + "_", ".csv");
+        
+        try (java.io.BufferedWriter writer = java.nio.file.Files.newBufferedWriter(outFile)) {
+            // CSV Header
+            writer.write("Tipo,Categoría/Nombre,Valor,Unidad\n");
+            
+            // General stats
+            writer.write("Estadística General,Total Archivos," + lblTotalFiles.getText() + ",archivos\n");
+            writer.write("Estadística General,Tamaño Total," + lblTotalSize.getText() + ",bytes\n");
+            writer.write("Estadística General,Archivos Vacíos," + lblEmptyFiles.getText() + ",archivos\n");
+            writer.write("Estadística General,Archivos Antiguos," + lblOldFiles.getText() + ",archivos\n");
+            writer.write("Estadística General,Tamaño Archivos Antiguos," + lblOldFilesSize.getText() + ",bytes\n");
+            writer.write("Estadística General,Tamaño Promedio," + lblAvgFileSize.getText() + ",bytes\n");
+            
+            // Category stats
+            for (CategoryStats c : categoryList) {
+                writer.write(String.format("Categoría,%s,%d,archivos\n", 
+                    c.getCategory(), c.getFileCount()));
+                writer.write(String.format("Categoría,%s,%s,bytes\n", 
+                    c.getCategory(), FormatUtils.formatFileSize(c.getTotalSize()).replace(",", "")));
+            }
+            
+            // Largest files
+            for (LargeFile f : largeFilesList) {
+                writer.write(String.format("Archivo Grande,%s,%s,bytes\n", 
+                    f.getFileName(), FormatUtils.formatFileSize(f.getSize()).replace(",", "")));
+            }
+        }
+        
+        return outFile;
+    }
+
+    private java.nio.file.Path exportToJson(String scanId) throws Exception {
+        java.nio.file.Path outFile = java.nio.file.Files.createTempFile(
+            "sfo_stats_" + scanId + "_", ".json");
+        
+        JsonObject root = new JsonObject();
+        root.addProperty("scan_id", scanId);
+        root.addProperty("export_date", new java.util.Date().toString());
+        
+        // General stats
+        JsonObject general = new JsonObject();
+        general.addProperty("total_files", lblTotalFiles.getText());
+        general.addProperty("total_size", lblTotalSize.getText());
+        general.addProperty("empty_files", lblEmptyFiles.getText());
+        general.addProperty("old_files", lblOldFiles.getText());
+        general.addProperty("old_files_size", lblOldFilesSize.getText());
+        general.addProperty("avg_file_size", lblAvgFileSize.getText());
+        general.addProperty("files_per_category", categoryList.size());
+        root.add("general_stats", general);
+        
+        // Category stats
+        JsonArray categories = new JsonArray();
+        for (CategoryStats c : categoryList) {
+            JsonObject cat = new JsonObject();
+            cat.addProperty("category", c.getCategory());
+            cat.addProperty("file_count", c.getFileCount());
+            cat.addProperty("total_size", c.getTotalSize());
+            cat.addProperty("percentage", c.getPercentage());
+            cat.addProperty("formatted_size", c.getFormattedSize());
+            cat.addProperty("formatted_percentage", c.getFormattedPercentage());
+            categories.add(cat);
+        }
+        root.add("categories", categories);
+        
+        // Largest files
+        JsonArray largest = new JsonArray();
+        for (LargeFile f : largeFilesList) {
+            JsonObject file = new JsonObject();
+            file.addProperty("rank", f.getRank());
+            file.addProperty("name", f.getFileName());
+            file.addProperty("path", f.getPath());
+            file.addProperty("size", f.getSize());
+            file.addProperty("formatted_size", f.getFormattedSize());
+            file.addProperty("modified", f.getFormattedModified());
+            largest.add(file);
+        }
+        root.add("largest_files", largest);
+        
+        // Extensions
+        JsonArray extensions = new JsonArray();
+        for (String ext : extensionsList) {
+            extensions.add(ext);
+        }
+        root.add("extensions", extensions);
+        
+        java.nio.file.Files.writeString(outFile, root.toString());
+        return outFile;
+    }
+
+    private java.nio.file.Path exportToText(String scanId) throws Exception {
+        StringBuilder sb = new StringBuilder();
+        sb.append("Smart File Organizer — Estadísticas\n");
+        sb.append("Escaneo: ").append(scanId).append("\n");
+        sb.append("Fecha exportación: ").append(new java.util.Date()).append("\n\n");
+        
+        sb.append("ESTADÍSTICAS GENERALES:\n");
+        sb.append(String.format("  Total archivos: %s\n", lblTotalFiles.getText()));
+        sb.append(String.format("  Tamaño total: %s\n", lblTotalSize.getText()));
+        sb.append(String.format("  Archivos vacíos: %s\n", lblEmptyFiles.getText()));
+        sb.append(String.format("  Archivos antiguos: %s\n", lblOldFiles.getText()));
+        sb.append(String.format("  Tamaño archivos antiguos: %s\n", lblOldFilesSize.getText()));
+        sb.append(String.format("  Tamaño promedio: %s\n", lblAvgFileSize.getText()));
+        sb.append(String.format("  Categorías: %d\n\n", categoryList.size()));
+        
+        sb.append("CATEGORÍAS:\n");
+        for (CategoryStats c : categoryList) {
+            sb.append(String.format("  %-12s  %d archivos  %s  (%.1f%%)\n",
+                c.getCategory(), c.getFileCount(),
+                FormatUtils.formatFileSize(c.getTotalSize()), c.getPercentage()));
+        }
+        sb.append("\nARCHIVOS MÁS GRANDES:\n");
+        for (LargeFile f : largeFilesList) {
+            sb.append(String.format("  %2d. %-40s  %s\n",
+                f.getRank(), f.getFileName(), f.getFormattedSize()));
+        }
+        sb.append("\nEXTENSIONES:\n");
+        for (String ext : extensionsList) sb.append("  ").append(ext).append("\n");
+
+        java.nio.file.Path out = java.nio.file.Files.createTempFile(
+            "sfo_stats_" + scanId + "_", ".txt");
+        java.nio.file.Files.writeString(out, sb.toString());
+        return out;
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

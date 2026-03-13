@@ -88,7 +88,7 @@ public class ScannerController implements Initializable {
     @FXML private TableColumn<ScanInfo, String> colStatus;
     @FXML private TableColumn<ScanInfo, Integer> colFiles;
     @FXML private TableColumn<ScanInfo, String> colDate;
-    @FXML private TableColumn<ScanInfo, String> colActions;
+    @FXML private TableColumn<ScanInfo, javafx.scene.layout.HBox> colActions;  // FIX: Change to HBox type
 
     private ApiClient apiClient;
     private Timer progressTimer;
@@ -116,7 +116,7 @@ public class ScannerController implements Initializable {
         colStatus.setCellValueFactory(new PropertyValueFactory<>("status"));
         colFiles.setCellValueFactory(new PropertyValueFactory<>("filesFound"));
         colDate.setCellValueFactory(new PropertyValueFactory<>("date"));
-        colActions.setCellValueFactory(new PropertyValueFactory<>("actions"));
+        colActions.setCellValueFactory(new PropertyValueFactory<>("actions"));  // FIX: Now works with HBox
         
         tableScans.setItems(scanList);
     }
@@ -356,10 +356,8 @@ public class ScannerController implements Initializable {
                             
                             TreeItem<PathItem> folderItem = new TreeItem<>(pathItem);
                             
-                            // Si tiene subcarpetas, agregar placeholder
-                            if (hasSubFolders(folderPath)) {
-                                folderItem.getChildren().add(new TreeItem<>(new PathItem("Loading...", "")));
-                            }
+                            // FIX: Always add placeholder for lazy loading, remove blocking hasSubFolders call
+                            folderItem.getChildren().add(new TreeItem<>(new PathItem("Loading...", "")));
                             
                             parentItem.getChildren().add(folderItem);
                         }
@@ -373,15 +371,6 @@ public class ScannerController implements Initializable {
                 });
             }
         });
-    }
-
-    private boolean hasSubFolders(String path) {
-        try {
-            List<Map<String, Object>> items = apiClient.exploreFolders(path, false, 1);
-            return items.stream().anyMatch(item -> (Boolean) item.get("is_directory"));
-        } catch (Exception e) {
-            return false;
-        }
     }
 
     private void validateSelectedPath(String path) {
@@ -458,15 +447,11 @@ public class ScannerController implements Initializable {
         
         // Cerrar WebSocket si está conectado
         if (isWebSocketConnected) {
-            ApiClient.closeScanWebSocket();
+            apiClient.closeScanWebSocket();  // FIX: Use instance method instead of static
             isWebSocketConnected = false;
             
-            // Cancelar escaneo en backend
-            try {
-                apiClient.deleteScan(currentScanId);
-            } catch (Exception e) {
-                System.err.println("Error cancelando escaneo: " + e.getMessage());
-            }
+            // FIX: Only cancel progress locally, don't delete scan from backend
+            // The scan remains in history for user to view or delete manually
         }
 
         // Resetear UI
@@ -516,7 +501,7 @@ public class ScannerController implements Initializable {
 
     private void startProgressMonitoring() {
         // Usar WebSocket para monitoreo en tiempo real
-        ApiClient.connectScanWebSocket(currentScanId, this::handleWsMessage, 
+        apiClient.connectScanWebSocket(currentScanId, this::handleWsMessage,  // FIX: Use instance method
             this::onScanComplete, this::onScanError);
         isWebSocketConnected = true;
     }
@@ -560,7 +545,7 @@ public class ScannerController implements Initializable {
         
         Platform.runLater(() -> {
             // Close WebSocket
-            ApiClient.closeScanWebSocket();
+            apiClient.closeScanWebSocket();  // FIX: Use instance method instead of static
             isWebSocketConnected = false;
             
             // Reset UI buttons manually

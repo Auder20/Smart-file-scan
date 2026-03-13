@@ -202,8 +202,13 @@ def explore_folders(
 ) -> List[FolderInfo]:
     """Explora carpetas en una ruta específica usando os.scandir para速度快"""
     
-    # Resolve path for Docker mode if needed
-    resolved_path = _resolve_path_for_docker(path)
+    # SEC 1: Normalize path and check for path traversal
+    normalized_path = os.path.realpath(path)
+    resolved_path = _resolve_path_for_docker(normalized_path)
+    
+    # Check if path is blocked system path
+    if _is_blocked(resolved_path):
+        raise HTTPException(403, detail=f"Acceso denegado a ruta del sistema: {path}")
     
     if not os.path.exists(resolved_path):
         raise HTTPException(404, detail=f"La ruta '{path}' no existe")
@@ -219,7 +224,7 @@ def explore_folders(
                 try:
                     folder_info = FolderInfo(
                         name=entry.name,
-                        path=path,  # Return original OS path, not resolved path
+                        path=entry.path,  # FIX: Usar ruta completa del elemento, no del directorio padre
                         is_directory=entry.is_dir()
                     )
                     
@@ -245,7 +250,7 @@ def explore_folders(
                     try:
                         folders.append(FolderInfo(
                             name=entry.name + " (sin acceso)",
-                            path=path,
+                            path=entry.path,  # FIX: Usar ruta completa del elemento, no del directorio padre
                             is_directory=entry.is_dir()
                         ))
                     except:
@@ -261,31 +266,35 @@ def explore_folders(
 
 
 @router.get("/validate-path")
-def validate_scan_path(path: str = Query(...)) -> dict:
+def validate_scan_path(path: str = Query(..., description="Ruta a validar")) -> dict:
     """Valida si una ruta es apta para escaneo"""
     
-    if not os.path.isabs(path):
+    # SEC 1: Normalize path and check for path traversal
+    normalized_path = os.path.realpath(path)
+    resolved_path = _resolve_path_for_docker(normalized_path)
+    
+    if not os.path.isabs(normalized_path):
         return {
             "valid": False,
             "reason": "La ruta debe ser absoluta",
             "suggestion": "Usa rutas absolutas como C:\\Users o /home/user"
         }
     
-    if _is_blocked(path):
+    if _is_blocked(resolved_path):
         return {
             "valid": False,
             "reason": "Ruta del sistema bloqueada por seguridad",
             "suggestion": "Selecciona carpetas de usuario o datos"
         }
     
-    if not os.path.exists(path):
+    if not os.path.exists(resolved_path):
         return {
             "valid": False,
             "reason": "La ruta no existe",
             "suggestion": "Verifica que la ruta sea correcta"
         }
     
-    if not os.path.isdir(path):
+    if not os.path.isdir(resolved_path):
         return {
             "valid": False,
             "reason": "La ruta no es un directorio",
@@ -294,7 +303,7 @@ def validate_scan_path(path: str = Query(...)) -> dict:
     
     # Check read permissions
     try:
-        os.listdir(path)
+        os.listdir(resolved_path)
         readable = True
     except PermissionError:
         return {
@@ -305,7 +314,7 @@ def validate_scan_path(path: str = Query(...)) -> dict:
     
     # Check write permissions (optional for scanning)
     try:
-        test_file = os.path.join(path, ".access_test")
+        test_file = os.path.join(resolved_path, ".access_test")
         with open(test_file, 'w') as f:
             f.write("test")
         os.remove(test_file)
@@ -313,13 +322,13 @@ def validate_scan_path(path: str = Query(...)) -> dict:
     except PermissionError:
         writable = False
     except Exception as e:
-        logger.warning(f"Error checking write permissions for {path}: {e}")
+        logger.warning(f"Error checking write permissions for {resolved_path}: {e}")
         writable = False
     
     # Quick file count estimation
     try:
         file_count = 0
-        for root, dirs, files in os.walk(path):
+        for root, dirs, files in os.walk(resolved_path):
             try:
                 file_count += len(files)
             except PermissionError:

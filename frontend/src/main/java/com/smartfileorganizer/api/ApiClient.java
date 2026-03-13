@@ -27,11 +27,11 @@ public class ApiClient {
 
     private static final MediaType JSON = MediaType.get("application/json");
     
-    // WebSocket for real-time scan progress
-    private static WebSocket activeWebSocket;
-    private static Consumer<JsonObject> wsMessageHandler;
-    private static Runnable wsOnComplete;
-    private static Consumer<String> wsOnError;
+    // WebSocket for real-time scan progress - FIX: Convert to instance fields
+    private WebSocket activeWebSocket;
+    private Consumer<JsonObject> wsMessageHandler;
+    private Runnable wsOnComplete;
+    private Consumer<String> wsOnError;
 
     public ApiClient() {}
 
@@ -137,6 +137,39 @@ public class ApiClient {
 
     public com.smartfileorganizer.models.ScanResult getScanResult(String scanId) throws Exception {
         return getScanResultAsync(scanId).get();
+    }
+
+    // FEAT 3: Get files for a scan with pagination
+    public CompletableFuture<Map<String, Object>> getScanFilesAsync(String scanId, int page, int pageSize) {
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                HttpUrl url = HttpUrl.parse(BASE_URL + "/api/scan/" + scanId + "/files")
+                    .newBuilder()
+                    .addQueryParameter("page", String.valueOf(page))
+                    .addQueryParameter("page_size", String.valueOf(pageSize))
+                    .build();
+
+                Request req = new Request.Builder()
+                    .url(url)
+                    .get()
+                    .build();
+
+                try (Response response = client.newCall(req).execute()) {
+                    if (!response.isSuccessful()) {
+                        throw new IOException("Unexpected code " + response);
+                    }
+                    
+                    String responseBody = response.body().string();
+                    return gson.fromJson(responseBody, Map.class);
+                }
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        });
+    }
+
+    public Map<String, Object> getScanFiles(String scanId, int page, int pageSize) throws Exception {
+        return getScanFilesAsync(scanId, page, pageSize).get();
     }
 
     public CompletableFuture<List<Map<String, Object>>> listAllScansAsync() {
@@ -447,7 +480,7 @@ public class ApiClient {
 
     // ── WebSocket Support ─────────────────────────────────────────────────────
 
-    public static void connectScanWebSocket(String scanId, Consumer<JsonObject> onMessage, 
+    public void connectScanWebSocket(String scanId, Consumer<JsonObject> onMessage, 
                                      Runnable onComplete, Consumer<String> onError) {
         // Close existing connection if any
         closeScanWebSocket();
@@ -505,7 +538,7 @@ public class ApiClient {
         activeWebSocket = client.newWebSocket(request, listener);
     }
     
-    public static void closeScanWebSocket() {
+    public void closeScanWebSocket() {
         if (activeWebSocket != null) {
             activeWebSocket.close(1000, "Connection closed by client");
             activeWebSocket = null;

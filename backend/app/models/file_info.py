@@ -44,8 +44,11 @@ class ScanRequest(BaseModel):
     @classmethod
     def path_must_exist(cls, v: str) -> str:
         import os
-        if not os.path.isdir(v):
-            raise ValueError(f"El directorio no existe: {v}")
+        # ARCH 4: Resolve path for Docker before validation
+        from app.api.routes_explorer import _resolve_path_for_docker
+        resolved_path = _resolve_path_for_docker(v)
+        if not os.path.isdir(resolved_path):
+            raise ValueError(f"El directorio no existe: {resolved_path}")
         return v
 
 
@@ -65,6 +68,7 @@ class ScanResult(BaseModel):
     files:        list[FileInfo]
     scanned_at:   datetime = Field(default_factory=datetime.now)
     duration_sec: float    = 0.0
+    files_truncated: bool  = False  # FIX: Indica si la lista de archivos está truncada
 
 
 class ScanProgress(BaseModel):

@@ -5,6 +5,7 @@ import logging
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from contextlib import contextmanager
+import threading
 
 from app.models.file_info import FileInfo, FileCategory
 
@@ -13,11 +14,39 @@ logger = logging.getLogger(__name__)
 # Database configuration
 DB_PATH = "smart_file_organizer.db"
 
+# ARCH 3: Thread-local connection pool
+_thread_local = threading.local()
+
 def get_connection() -> sqlite3.Connection:
-    """Get database connection with thread-safe configuration"""
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row  # Enable dict-like row access
-    return conn
+    """Get database connection from thread-local pool"""
+    # Check if connection already exists for this thread
+    if not hasattr(_thread_local, 'connection') or _thread_local.connection is None:
+        _thread_local.connection = sqlite3.connect(DB_PATH, check_same_thread=False)
+        _thread_local.connection.row_factory = sqlite3.Row  # Enable dict-like row access
+        logger.debug(f"Created new database connection for thread {threading.get_ident()}")
+    
+    return _thread_local.connection
+
+def close_connection() -> None:
+    """Close the connection for current thread"""
+    if hasattr(_thread_local, 'connection') and _thread_local.connection is not None:
+        _thread_local.connection.close()
+        _thread_local.connection = None
+        logger.debug(f"Closed database connection for thread {threading.get_ident()}")
+
+@contextmanager
+def get_db_cursor():
+    """Context manager for database cursor using thread-local connection"""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        yield cursor
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cursor.close()
 
 def init_database() -> None:
     """Initialize database tables"""
@@ -68,20 +97,6 @@ def init_database() -> None:
         logger.error(f"Failed to initialize database: {e}")
         raise
 
-@contextmanager
-def get_db_cursor():
-    """Context manager for database cursor"""
-    conn = get_connection()
-    try:
-        cursor = conn.cursor()
-        yield cursor
-        conn.commit()
-    except Exception as e:
-        conn.rollback()
-        logger.error(f"Database error: {e}")
-        raise
-    finally:
-        conn.close()
 
 def save_scan_metadata(scan_id: str, root_path: str, status: str, 
                     total_files: int = 0, total_size: int = 0, 
