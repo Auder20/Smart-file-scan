@@ -5,6 +5,7 @@ import os
 import logging
 import random
 import multiprocessing
+import platform
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional, Callable
@@ -198,22 +199,53 @@ def _compute_hashes_parallel(
 
 
 def _partial_hash(path: str) -> Optional[str]:
+    """Compute partial hash for duplicate detection with Docker path support"""
     try:
-        with open(path, "rb") as f:
+        # Translate path if running in Docker mode
+        resolved_path = _resolve_path_for_docker_hasher(path)
+        with open(resolved_path, "rb") as f:
             return hashlib.md5(f.read(_PARTIAL_SIZE)).hexdigest()
     except (OSError, IOError):
         return None
 
 
 def _full_hash(path: str) -> Optional[str]:
+    """Compute full hash for duplicate detection with Docker path support"""
     try:
+        # Translate path if running in Docker mode
+        resolved_path = _resolve_path_for_docker_hasher(path)
         hasher = hashlib.sha256()
-        with open(path, "rb") as f:
+        with open(resolved_path, "rb") as f:
             while chunk := f.read(_CHUNK_SIZE):
                 hasher.update(chunk)
         return hasher.hexdigest()
     except (OSError, IOError):
         return None
+
+
+def _resolve_path_for_docker_hasher(path: str) -> str:
+    """Translate paths for file access in hasher module"""
+    host_root = os.getenv("HOST_ROOT")
+    if not host_root:
+        return path
+    
+    # If path starts with /host/, it's already in Docker format
+    if path.startswith("/host/"):
+        return path
+    
+    # Translate native path to Docker format
+    if platform.system() == "Windows":
+        # C:\Users\X -> /host/c/Users/X
+        if len(path) >= 2 and path[1] == ':':
+            drive = path[0].lower()
+            rest_path = path[2:].replace('\\', '/')
+            return f"{host_root}/{drive}{rest_path}"
+    else:
+        # Linux/macOS: /home/x -> /host/home/x
+        if path.startswith('/'):
+            return f"{host_root}{path}"
+    
+    return path
 
 
 def _build_group(hash_value: str, files: list[FileInfo]) -> DuplicateGroup:

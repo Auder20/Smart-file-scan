@@ -105,11 +105,34 @@ def _resolve_path_for_docker(path: str) -> str:
     return path
 
 
+def _translate_path_from_docker(docker_path: str) -> str:
+    """Translate /host/X paths back to native OS format for frontend consumption"""
+    host_root = os.getenv("HOST_ROOT")
+    if not host_root or not docker_path.startswith(host_root):
+        return docker_path
+    
+    relative_path = docker_path[len(host_root):]
+    
+    if platform.system() == "Windows":
+        # /c/Users/John -> C:\Users\John
+        if len(relative_path) >= 2 and relative_path[1] == '/':
+            drive_letter = relative_path[1].upper()
+            rest_path = relative_path[2:].replace('/', '\\')
+            return f"{drive_letter}:\\{rest_path}"
+    else:
+        # Linux/macOS: path is already correct
+        return relative_path
+    
+    return docker_path
+
+
 @router.get("/drives")
 def get_available_drives() -> List[AvailableDrive]:
     """Retorna las unidades/dispositivos disponibles para escanear"""
     
     drives = []
+    host_root = os.getenv("HOST_ROOT")
+    is_docker_mode = host_root is not None
     
     # Blocklist of filesystem types to skip
     SKIP_FSTYPES = {
@@ -120,7 +143,67 @@ def get_available_drives() -> List[AvailableDrive]:
     }
     
     try:
-        # Use psutil to detect all real drives/partitions
+        # IMPROVEMENT: In Docker mode, scan the /host directory for available drives
+        if is_docker_mode and os.path.exists(host_root):
+            logger.info(f"Docker mode detected, scanning {host_root} for available drives")
+            
+            # Scan for Windows-style drives (e.g., /host/c, /host/d)
+            if os.path.exists(host_root):
+                try:
+                    host_entries = os.listdir(host_root)
+                    for entry in host_entries:
+                        entry_path = os.path.join(host_root, entry)
+                        if not os.path.isdir(entry_path):
+                            continue
+                        
+                        # Check for Windows drive letters (single character directories)
+                        if len(entry) == 1 and entry.isalpha():
+                            # This is a Windows drive letter (e.g., c, d, e)
+                            drive_letter = entry.upper()
+                            native_path = f"{drive_letter}:\\"
+                            docker_path = entry_path
+                            
+                            # Also check for longer paths like /host/parent-distro/mnt/host/wsl/
+                            # These are WSL mounts
+                            if entry.lower() in ['mnt', 'media', 'volumes']:
+                                # Recursively scan for more drives
+                                _scan_for_drives_recursive(entry_path, drives, host_root, native_path.startswith("C:"), is_docker_mode)
+                                continue
+                            
+                            try:
+                                usage = psutil.disk_usage(docker_path)
+                                drive = AvailableDrive(
+                                    name=native_path,
+                                    path=native_path,
+                                    total_space=usage.total,
+                                    free_space=usage.free,
+                                    used_space=usage.used,
+                                    filesystem="ntfs" if drive_letter in ['C', 'D'] else "unknown",
+                                    is_removable=drive_letter not in ['C']
+                                )
+                            except:
+                                drive = AvailableDrive(
+                                    name=native_path,
+                                    path=native_path,
+                                    filesystem="unknown",
+                                    is_removable=drive_letter not in ['C']
+                                )
+                            drives.append(drive)
+                        
+                        # Check for Linux-style mounts (e.g., /host/home, /host/media)
+                        elif entry.lower() in ['home', 'media', 'mnt', 'Volumes']:
+                            _scan_for_drives_recursive(entry_path, drives, host_root, False, is_docker_mode)
+                            
+                except Exception as e:
+                    logger.warning(f"Error scanning host root: {e}")
+            
+            # If we found drives, return them
+            if drives:
+                # Sort drives: fixed drives first, then removable
+                drives.sort(key=lambda d: (d.is_removable, d.name))
+                return drives
+        
+        # Fallback: Use psutil for native mode or if host_root scan failed
         partitions = psutil.disk_partitions(all=False)
         
         # Deduplicate by device, keeping the most specific mountpoint
@@ -149,14 +232,41 @@ def get_available_drives() -> List[AvailableDrive]:
             try:
                 usage = psutil.disk_usage(partition.mountpoint)
                 
+                # FIX: In Docker mode, translate mountpoint to /host/X format
+                display_path = partition.mountpoint
+                api_path = partition.mountpoint
+                
+                if host_root and partition.mountpoint.startswith(host_root):
+                    # This is a mounted host path, translate it back for the API
+                    # /host/c/Users -> C:/Users (Windows) or /home/user (Linux)
+                    relative_path = partition.mountpoint[len(host_root):]
+                    if platform.system() == "Windows":
+                        # /c/Users -> C:\Users
+                        if len(relative_path) >= 2 and relative_path[1] == '/':
+                            drive_letter = relative_path[1].upper()
+                            rest_path = relative_path[2:].replace('/', '\\')
+                            api_path = f"{drive_letter}:\\{rest_path}"
+                            display_path = api_path
+                    else:
+                        # Linux/macOS: path is already correct
+                        api_path = relative_path
+                        display_path = relative_path
+                elif host_root and not partition.mountpoint.startswith('/host'):
+                    # Mount point inside container that's not under /host
+                    # Try to check if it's accessible via /host
+                    host_equivalent = f"{host_root}{partition.mountpoint}"
+                    if os.path.exists(host_equivalent):
+                        api_path = host_equivalent
+                        display_path = partition.mountpoint
+                
                 # Format display name using mountpoint, not device
-                display_name = partition.mountpoint
+                display_name = display_path
                 if partition.fstype:
                     display_name += f" [{partition.fstype}]"
                 
                 drive = AvailableDrive(
-                    name=display_name,  # Use mountpoint as display name
-                    path=partition.mountpoint,
+                    name=display_name,
+                    path=api_path,  # Use translated path for API calls
                     total_space=usage.total,
                     free_space=usage.free,
                     used_space=usage.used,
@@ -168,13 +278,28 @@ def get_available_drives() -> List[AvailableDrive]:
             except Exception as e:
                 logger.warning(f"Cannot get usage for {partition.mountpoint}: {e}")
                 # Still add drive with basic info
-                display_name = partition.mountpoint
+                display_path = partition.mountpoint
+                api_path = partition.mountpoint
+                
+                if host_root and partition.mountpoint.startswith(host_root):
+                    relative_path = partition.mountpoint[len(host_root):]
+                    if platform.system() == "Windows":
+                        if len(relative_path) >= 2 and relative_path[1] == '/':
+                            drive_letter = relative_path[1].upper()
+                            rest_path = relative_path[2:].replace('/', '\\')
+                            api_path = f"{drive_letter}:\\{rest_path}"
+                            display_path = api_path
+                    else:
+                        api_path = relative_path
+                        display_path = relative_path
+                
+                display_name = display_path
                 if partition.fstype:
                     display_name += f" [{partition.fstype}]"
                 
                 drive = AvailableDrive(
-                    name=display_name,  # Use mountpoint as display name
-                    path=partition.mountpoint,
+                    name=display_name,
+                    path=api_path,
                     filesystem=partition.fstype,
                     is_removable=_is_removable(partition)
                 )
@@ -195,6 +320,78 @@ def get_available_drives() -> List[AvailableDrive]:
     return drives
 
 
+def _scan_for_drives_recursive(base_path: str, drives_list: list, host_root: str, is_windows: bool, is_docker_mode: bool):
+    """Recursively scan for drives in a directory structure"""
+    try:
+        entries = os.listdir(base_path)
+        for entry in entries:
+            entry_path = os.path.join(base_path, entry)
+            if not os.path.isdir(entry_path):
+                continue
+            
+            # Windows drive letters in WSL style (e.g., /host/mnt/c, /host/mnt/d)
+            if len(entry) == 1 and entry.isalpha():
+                drive_letter = entry.upper()
+                native_path = f"{drive_letter}:\\"
+                
+                try:
+                    usage = psutil.disk_usage(entry_path)
+                    drive = AvailableDrive(
+                        name=native_path,
+                        path=native_path,
+                        total_space=usage.total,
+                        free_space=usage.free,
+                        used_space=usage.used,
+                        filesystem="ntfs" if drive_letter in ['C', 'D'] else "unknown",
+                        is_removable=drive_letter not in ['C']
+                    )
+                except:
+                    drive = AvailableDrive(
+                        name=native_path,
+                        path=native_path,
+                        filesystem="unknown",
+                        is_removable=drive_letter not in ['C']
+                    )
+                
+                # Avoid duplicates
+                if not any(d.path == native_path for d in drives_list):
+                    drives_list.append(drive)
+            
+            # Linux mount points
+            elif entry.lower() not in ['lost+found']:
+                # Translate to native path
+                if host_root and entry_path.startswith(host_root):
+                    native_path = entry_path[len(host_root):]
+                else:
+                    native_path = entry_path
+                
+                try:
+                    usage = psutil.disk_usage(entry_path)
+                    drive = AvailableDrive(
+                        name=native_path,
+                        path=native_path,
+                        total_space=usage.total,
+                        free_space=usage.free,
+                        used_space=usage.used,
+                        filesystem="ext4",
+                        is_removable='media' in entry_path.lower() or 'mnt' in entry_path.lower()
+                    )
+                except:
+                    drive = AvailableDrive(
+                        name=native_path,
+                        path=native_path,
+                        filesystem="unknown",
+                        is_removable='media' in entry_path.lower() or 'mnt' in entry_path.lower()
+                    )
+                
+                # Avoid duplicates
+                if not any(d.path == native_path for d in drives_list):
+                    drives_list.append(drive)
+                    
+    except Exception as e:
+        logger.debug(f"Error in recursive scan: {e}")
+
+
 @router.get("/folders")
 def explore_folders(
     path: str = Query(..., description="Ruta a explorar"),
@@ -202,29 +399,43 @@ def explore_folders(
 ) -> List[FolderInfo]:
     """Explora carpetas en una ruta específica usando os.scandir para速度快"""
     
-    # SEC 1: Normalize path and check for path traversal
-    normalized_path = os.path.realpath(path)
-    resolved_path = _resolve_path_for_docker(normalized_path)
+    # FIX: Handle Docker path translation properly
+    # The path comes from the frontend in native OS format (e.g., C:\Users or /home/user)
+    # We need to translate it to /host/X format for Docker access
+    resolved_path = _resolve_path_for_docker(path)
+    
+    # Also try realpath for normalized path
+    normalized_path = os.path.realpath(resolved_path)
     
     # Check if path is blocked system path
-    if _is_blocked(resolved_path):
+    if _is_blocked(normalized_path):
         raise HTTPException(403, detail=f"Acceso denegado a ruta del sistema: {path}")
     
-    if not os.path.exists(resolved_path):
-        raise HTTPException(404, detail=f"La ruta '{path}' no existe")
+    if not os.path.exists(normalized_path):
+        # Try original path as fallback (for native mode)
+        if not os.path.exists(path):
+            raise HTTPException(404, detail=f"La ruta '{path}' no existe")
+        normalized_path = path
     
     folders = []
     
     try:
-        with os.scandir(resolved_path) as entries:
+        with os.scandir(normalized_path) as entries:
             for entry in entries:
                 if not include_hidden and _is_hidden(entry):
                     continue
                 
                 try:
+                    # Return the original path format to the frontend, not the /host/X format
+                    # This ensures the frontend can use the paths correctly
+                    return_path = entry.path
+                    if os.getenv("HOST_ROOT") and entry.path.startswith(os.getenv("HOST_ROOT")):
+                        # Translate back from /host/X to native format
+                        return_path = _translate_path_from_docker(entry.path)
+                    
                     folder_info = FolderInfo(
                         name=entry.name,
-                        path=entry.path,  # FIX: Usar ruta completa del elemento, no del directorio padre
+                        path=return_path,  # Return native format path to frontend
                         is_directory=entry.is_dir()
                     )
                     
@@ -248,9 +459,13 @@ def explore_folders(
                     logger.debug(f"Error accessing {entry.path}: {e}")
                     # Add with limited access label
                     try:
+                        return_path = entry.path
+                        if os.getenv("HOST_ROOT") and entry.path.startswith(os.getenv("HOST_ROOT")):
+                            return_path = _translate_path_from_docker(entry.path)
+                        
                         folders.append(FolderInfo(
                             name=entry.name + " (sin acceso)",
-                            path=entry.path,  # FIX: Usar ruta completa del elemento, no del directorio padre
+                            path=return_path,  # Return native format path to frontend
                             is_directory=entry.is_dir()
                         ))
                     except:

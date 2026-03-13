@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import logging
+import platform
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -104,14 +105,56 @@ def get_duplicates(scan_id: str) -> DuplicatesResult:
     )
 
 
+def _resolve_path_for_docker_api(path: str) -> str:
+    """Translate paths between Docker and native format for validation"""
+    host_root = os.getenv("HOST_ROOT")
+    if not host_root:
+        return path
+    
+    # If path starts with /host/, it's already in Docker format
+    if path.startswith("/host/"):
+        return path
+    
+    # Translate native path to Docker format
+    if platform.system() == "Windows":
+        # C:\Users\X -> /host/c/Users/X
+        if len(path) >= 2 and path[1] == ':':
+            drive = path[0].lower()
+            rest_path = path[2:].replace('\\', '/')
+            return f"{host_root}/{drive}{rest_path}"
+    else:
+        # Linux/macOS: /home/x -> /host/home/x
+        if path.startswith('/'):
+            return f"{host_root}{path}"
+    
+    return path
+
+
 def _is_path_from_registered_scan(path: str) -> bool:
     """FIX: Verifica si una ruta pertenece a algún scan registrado en SQLite"""
     try:
+        # First check if path needs Docker translation
+        resolved_path = _resolve_path_for_docker_api(path)
+        
+        # Also generate alternative path formats for better matching
+        alt_paths = [path, resolved_path]
+        
+        # Add reverse translation (from docker to native)
+        if resolved_path.startswith("/host/"):
+            relative = resolved_path[len("/host/"):]
+            if len(relative) >= 2 and relative[1] == '/':
+                drive_letter = relative[0].upper()
+                rest = relative[2:].replace('/', '\\')
+                native_path = f"{drive_letter}:\\{rest}"
+                alt_paths.append(native_path)
+        
         with get_db_cursor() as cursor:
-            cursor.execute("""
+            # Build dynamic query to check all possible path formats
+            placeholders = ','.join(['?' for _ in alt_paths])
+            cursor.execute(f"""
                 SELECT COUNT(*) FROM scan_files 
-                WHERE path = ?
-            """, (path,))
+                WHERE path IN ({placeholders})
+            """, alt_paths)
             return cursor.fetchone()[0] > 0
     except Exception as e:
         logger.error(f"Error verificando ruta {path}: {e}")
@@ -125,10 +168,32 @@ def delete_files(request: DeleteRequest) -> DeleteResult:
     space_freed = 0
 
     for path in request.paths:
-        if not os.path.isfile(path):
+        # FIX: Translate path from native format to Docker format if needed
+        resolved_path = _resolve_path_for_docker_api(path)
+        
+        # Check if file exists using resolved path first, then try alternatives
+        paths_to_try = [resolved_path, path]
+        
+        # Also try reverse translation
+        if resolved_path.startswith("/host/"):
+            relative = resolved_path[len("/host/"):]
+            if len(relative) >= 2 and relative[1] == '/':
+                drive_letter = relative[0].upper()
+                rest = relative[2:].replace('/', '\\')
+                native_path = f"{drive_letter}:\\{rest}"
+                paths_to_try.append(native_path)
+        
+        actual_path = None
+        for p in paths_to_try:
+            if os.path.isfile(p):
+                actual_path = p
+                break
+        
+        if actual_path is None:
+            logger.warning(f"File not found: {path} (tried: {paths_to_try})")
             failed.append(path)
             continue
-
+        
         # FIX: Validar que la ruta pertenezca a algún scan registrado
         if not _is_path_from_registered_scan(path):
             logger.warning(f"Ruta no pertenece a ningún scan registrado: {path}")
@@ -136,15 +201,15 @@ def delete_files(request: DeleteRequest) -> DeleteResult:
             continue
 
         try:
-            size = os.path.getsize(path)
+            size = os.path.getsize(actual_path)
 
             if request.use_recycle:
                 import send2trash
-                send2trash.send2trash(path)
+                send2trash.send2trash(actual_path)
             else:
-                os.remove(path)
+                os.remove(actual_path)
 
-            deleted.append(path)
+            deleted.append(path)  # Return original path in response
             space_freed += size
 
         except Exception as e:
