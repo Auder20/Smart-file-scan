@@ -51,9 +51,7 @@ def get_db_cursor():
 def init_database() -> None:
     """Initialize database tables"""
     try:
-        with get_connection() as conn:
-            cursor = conn.cursor()
-            
+        with get_db_cursor() as cursor:
             # Create scans table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS scans (
@@ -90,7 +88,6 @@ def init_database() -> None:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_scan_files_extension ON scan_files(extension)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_scan_files_size ON scan_files(size)")
             
-            conn.commit()
             logger.info("Database initialized successfully")
             
     except Exception as e:
@@ -233,7 +230,7 @@ def get_files_paginated(scan_id: str, page: int = 1, page_size: int = 100,
             
             return {
                 'files': files,
-                'total_count': total_count,
+                'total_files': total_count,
                 'page': page,
                 'page_size': page_size,
                 'total_pages': (total_count + page_size - 1) // page_size
@@ -243,7 +240,7 @@ def get_files_paginated(scan_id: str, page: int = 1, page_size: int = 100,
         logger.error(f"Failed to get paginated files for scan {scan_id}: {e}")
         return {
             'files': [],
-            'total_count': 0,
+            'total_files': 0,
             'page': page,
             'page_size': page_size,
             'total_pages': 0

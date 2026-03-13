@@ -40,14 +40,20 @@ async def lifespan(app: FastAPI):
 async def _rehydrate_scanner_state():
     """Load completed scans from SQLite into memory on startup"""
     try:
-        from app.db.database import get_scans
-        from app.models.file_info import ScanProgress, ScanStatus
+        from app.db.database import get_scans, get_files_paginated
+        from app.models.file_info import ScanProgress, ScanStatus, ScanResult
+        from app.core.scan_store import scan_store
         from datetime import datetime
         
         logger.info("Rehydrating scanner state from SQLite...")
         
         # Get all scans from database
-        scans = get_scans()
+        try:
+            scans = get_scans()
+        except Exception as e:
+            logger.warning(f"Database not available during rehydration: {e}")
+            scans = []
+        
         rehydrated_count = 0
         
         for scan_data in scans:
@@ -56,7 +62,7 @@ async def _rehydrate_scanner_state():
             
             # Only rehydrate completed scans
             if status == "completed":
-                # Create basic progress entry without loading all files
+                # Create basic progress entry
                 progress = ScanProgress(
                     scan_id=scan_id,
                     status=ScanStatus.COMPLETED,
@@ -65,11 +71,33 @@ async def _rehydrate_scanner_state():
                     message=f"Completado: {scan_data.get('total_files', 0):,} archivos"
                 )
                 
-                # Store in scanner module's progress tracking
-                scanner_mod._scan_progress[scan_id] = progress
+                # Store in scan_store
+                scan_store.set_scan_progress(scan_id, progress)
+                
+                # Create minimal ScanResult for rehydration (files loaded from DB on demand)
+                try:
+                    # Get total files count from database
+                    paginated_result = get_files_paginated(scan_id, 1, 1)  # Just get count
+                    total_files = paginated_result.get('total_files', 0)
+                except Exception:
+                    total_files = scan_data.get("total_files", 0)
+                
+                result = ScanResult(
+                    scan_id=scan_id,
+                    root_path=scan_data.get("root_path", ""),
+                    status=ScanStatus.COMPLETED,
+                    total_files=total_files,
+                    total_size=scan_data.get("total_size", 0),
+                    files=[],  # Empty - will be loaded from DB on demand
+                    scanned_at=datetime.fromisoformat(scan_data["scanned_at"]) if scan_data.get("scanned_at") else datetime.now(),
+                    duration_sec=scan_data.get("duration_sec", 0.0),
+                    files_truncated=True  # Always true for rehydrated scans
+                )
+                
+                scan_store.set_scan_result(scan_id, result)
                 rehydrated_count += 1
                 
-                logger.debug(f"Rehydrated scan {scan_id} with {scan_data.get('total_files', 0)} files")
+                logger.debug(f"Rehydrated scan {scan_id} with {total_files} files")
         
         logger.info(f"Rehydrated {rehydrated_count} completed scans from database")
         

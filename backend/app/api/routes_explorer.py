@@ -265,20 +265,37 @@ def explore_folders(
     return folders
 
 
+@router.get("/debug/current-dir")
+def get_current_dir() -> dict:
+    """Endpoint de depuración para ver el directorio actual"""
+    return {
+        "current_dir": os.getcwd(),
+        "pwd_env": os.getenv("PWD"),
+        "host_root": os.getenv("HOST_ROOT"),
+        "resolved_work_dir": "/host/parent-distro/mnt/host/wsl/docker-desktop-user-distro" if os.getenv("PWD") == "/app" else f"{os.getenv('HOST_ROOT')}{os.getenv('PWD', '')}"
+    }
+
 @router.get("/validate-path")
 def validate_scan_path(path: str = Query(..., description="Ruta a validar")) -> dict:
     """Valida si una ruta es apta para escaneo"""
     
     # SEC 1: Normalize path and check for path traversal
     normalized_path = os.path.realpath(path)
-    resolved_path = _resolve_path_for_docker(normalized_path)
     
-    if not os.path.isabs(normalized_path):
-        return {
-            "valid": False,
-            "reason": "La ruta debe ser absoluta",
-            "suggestion": "Usa rutas absolutas como C:\\Users o /home/user"
-        }
+    # Para Docker/WSL: permitir rutas relativas al directorio actual
+    if os.getenv("HOST_ROOT") and not os.path.isabs(normalized_path):
+        # Si es una ruta relativa en modo Docker, resolverla relativamente al directorio de trabajo del host
+        # Usar el directorio de trabajo del backend como base para rutas relativas
+        backend_work_dir = os.getenv("PWD", "/app")  # Directorio actual del contenedor
+        # Mapear al directorio correspondiente en el host
+        if backend_work_dir == "/app":
+            host_work_dir = "/host/parent-distro/mnt/host/wsl/docker-desktop-user-distro"
+        else:
+            host_work_dir = f"{os.getenv('HOST_ROOT')}{backend_work_dir}"
+        
+        resolved_path = os.path.join(host_work_dir, normalized_path)
+    else:
+        resolved_path = _resolve_path_for_docker(normalized_path)
     
     if _is_blocked(resolved_path):
         return {
@@ -297,8 +314,8 @@ def validate_scan_path(path: str = Query(..., description="Ruta a validar")) -> 
     if not os.path.isdir(resolved_path):
         return {
             "valid": False,
-            "reason": "La ruta no es un directorio",
-            "suggestion": "Selecciona una carpeta, no un archivo"
+            "reason": "La ruta debe ser un directorio",
+            "suggestion": "Selecciona una carpeta válida"
         }
     
     # Check read permissions

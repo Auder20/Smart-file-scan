@@ -8,7 +8,6 @@ from collections.abc import Generator
 from typing import Optional
 import multiprocessing
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import redis
 import json
 import hashlib
 import asyncio
@@ -34,17 +33,6 @@ def _estimate_file_count(path: str) -> int:
     except Exception:
         pass
     return count
-
-# Cache Redis para evitar reescaneos
-try:
-    redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
-    redis_client.ping()
-    REDIS_AVAILABLE = True
-    logger.info("Redis cache conectado")
-except:
-    redis_client = None
-    REDIS_AVAILABLE = False
-    logger.warning("Redis no disponible, usando cache en memoria")
 
 
 async def send_progress(websocket, progress):
@@ -266,85 +254,5 @@ def _build_file_info(entry: os.DirEntry) -> Optional[FileInfo]:
             created   = created,
         )
     except (OSError, ValueError) as e:
-        logger.debug("No se pudo procesar %s: %s", entry.path, e)
+        logger.error("Error procesando %s: %s", entry.path, e)
         return None
-
-
-def get_scan_cache_key(path: str, max_depth: int) -> str:
-    """Genera clave única para cache basada en ruta y profundidad"""
-    return f"scan:{hashlib.md5(path.encode())}:{max_depth}"
-
-def cache_scan_results(path: str, max_depth: int, files: list[FileInfo]):
-    """Guarda resultados del escaneo en cache"""
-    if REDIS_AVAILABLE:
-        try:
-            cache_key = get_scan_cache_key(path, max_depth)
-            cache_data = {
-                'files': [{'path': f.path, 'name': f.name, 'size': f.size, 
-                           'extension': f.extension, 'category': f.category,
-                           'modified': f.modified.isoformat(), 'created': f.created.isoformat()} 
-                          for f in files],
-                'timestamp': datetime.now().isoformat(),
-                'total_files': len(files)
-            }
-            redis_client.setex(cache_key, 3600, json.dumps(cache_data))  # FIX: Argumentos correctos: key, ttl, value
-            logger.info(f"Resultados cacheados para {path} ({len(files)} archivos)")
-        except Exception as e:
-            logger.error(f"Error cacheando resultados: {e}")
-
-def get_cached_scan_results(path: str, max_depth: int) -> Optional[list[FileInfo]]:
-    """Obtiene resultados cacheados si existen"""
-    if REDIS_AVAILABLE:
-        try:
-            cache_key = get_scan_cache_key(path, max_depth)
-            cached_data = redis_client.get(cache_key)
-            if cached_data:
-                data = json.loads(cached_data)
-                # Reconstruir objetos FileInfo
-                files = []
-                for f_data in data['files']:
-                    files.append(FileInfo(**f_data))
-                logger.info(f"Usando cache para {path} ({len(files)} archivos)")
-                return files
-        except Exception as e:
-            logger.error(f"Error obteniendo cache: {e}")
-    return None
-
-def collect_all_files(request: ScanRequest) -> tuple[list[FileInfo], float]:
-    start = time.time()
-    
-    # Verificar cache primero para evitar reescaneos
-    cached_files = get_cached_scan_results(request.path, request.max_depth)
-    if cached_files:
-        logger.info(f"Usando resultados cacheados para {request.path}")
-        return cached_files, 0.1  # Tiempo mínimo para cache hit
-    
-    # Si no hay cache, proceder con escaneo completo
-    logger.info(f"Realizando escaneo completo de {request.path}")
-    
-    # Estimar cantidad de archivos para decidir si es un disco grande
-    try:
-        estimated = _estimate_file_count(request.path)
-        is_large_drive = estimated > 50_000
-    except:
-        is_large_drive = False
-    
-    logger.info(f"Escaneando {request.path} (estimados: {estimated:,} archivos, paralelo: {is_large_drive})")
-    
-    # Usar escaneo paralelo para discos grandes
-    if is_large_drive:
-        scan_func = scan_directory_parallel
-        logger.info("Usando escaneo paralelo para disco grande")
-    else:
-        scan_func = scan_directory
-        logger.info("Usando escaneo secuencial")
-    
-    files = []
-    for event in scan_func(request):
-        if isinstance(event, FileInfo):
-            files.append(event)
-    
-    # Cache results para próximos usos
-    cache_scan_results(request.path, request.max_depth, files)
-    
-    return files, round(time.time() - start, 2)

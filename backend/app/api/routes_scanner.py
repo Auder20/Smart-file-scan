@@ -41,7 +41,9 @@ def _notify_ws(data: dict) -> None:
         try:
             asyncio.run_coroutine_threadsafe(ws.send_text(message), _event_loop)
         except Exception as e:
-            logger.debug(f"Failed to send WebSocket message: {e}")
+            logger.debug(f"Failed to send WebSocket message, removing dead connection: {e}")
+            if ws in _active_connections:
+                _active_connections.remove(ws)
 
 
 @router.post("", status_code=202)
@@ -274,7 +276,8 @@ def _run_scan(scan_id: str, request: ScanRequest) -> None:
                 _notify_ws(update_data)
         
         # Save remaining files
-        remaining_files = files[len(files) - (len(files) % 500):] if len(files) % 500 != 0 else []
+        last_saved_index = (len(files) // 500) * 500  # How many files were already saved in batches
+        remaining_files = files[last_saved_index:] if last_saved_index < len(files) else []
         if remaining_files:
             try:
                 save_file_batch(scan_id, remaining_files)

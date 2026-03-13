@@ -2,6 +2,8 @@ package com.smartfileorganizer.models;
 
 import javafx.scene.control.Button;
 import javafx.scene.layout.HBox;
+import javafx.collections.ObservableList;
+import com.smartfileorganizer.api.ApiClient;
 
 public class ScanInfo {
     private String scanId;
@@ -9,12 +11,17 @@ public class ScanInfo {
     private int filesFound;
     private String date;
     private HBox actions;  // FIX: Change from String to HBox for multiple buttons
+    private ObservableList<ScanInfo> scanList;  // Reference to parent list for delete functionality
+    private ApiClient apiClient;  // Reference to API client
 
-    public ScanInfo(String scanId, String status, int filesFound, String date) {
+    public ScanInfo(String scanId, String status, int filesFound, String date, 
+                  ObservableList<ScanInfo> scanList, ApiClient apiClient) {
         this.scanId = scanId;
         this.status = status;
         this.filesFound = filesFound;
         this.date = date;
+        this.scanList = scanList;
+        this.apiClient = apiClient;
         this.actions = createActionButtons(scanId, status);
     }
 
@@ -39,8 +46,16 @@ public class ScanInfo {
             Button deleteButton = new Button("Eliminar");
             deleteButton.setStyle("-fx-font-size: 11px; -fx-padding: 2 8px; -fx-background-color: #ef4444; -fx-text-fill: white;");
             deleteButton.setOnAction(e -> {
-                // TODO: Implement delete scan functionality
-                System.out.println("Delete scan: " + scanId);
+                try {
+                    // Call API to delete scan
+                    apiClient.deleteScanAsync(scanId);
+                    
+                    // Remove from the list (which will update the table)
+                    scanList.removeIf(scan -> scan.getScanId().equals(scanId));
+                    
+                } catch (Exception ex) {
+                    System.err.println("Error deleting scan: " + ex.getMessage());
+                }
             });
             buttonBox.getChildren().add(deleteButton);
         }
@@ -67,4 +82,8 @@ public class ScanInfo {
     public void setFilesFound(int filesFound) { this.filesFound = filesFound; }
     public void setDate(String date) { this.date = date; }
     public void setActions(HBox actions) { this.actions = actions; }
+    
+    // Additional setters for the new fields
+    public void setScanList(ObservableList<ScanInfo> scanList) { this.scanList = scanList; }
+    public void setApiClient(ApiClient apiClient) { this.apiClient = apiClient; }
 }

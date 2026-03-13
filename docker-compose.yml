@@ -12,16 +12,6 @@ services:
     environment:
       - HOST_ROOT=/host
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-    depends_on:
-      - redis
-
-  redis:
-    image: redis:7-alpine
-    container_name: redis_cache
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
 
   frontend:
     container_name: java_dev
@@ -32,8 +22,5 @@ services:
     volumes:
       - ./frontend:/app
     command: tail -f /dev/null
-
-volumes:
-  redis_data:
 
 # FOR DEVELOPMENT ONLY - end users run build-*.sh or build-win.bat

@@ -9,12 +9,19 @@ import javafx.fxml.Initializable;
 import javafx.scene.control.*;
 import javafx.scene.control.cell.PropertyValueFactory;
 import javafx.scene.layout.HBox;
+import javafx.stage.FileChooser;
+import javafx.stage.Stage;
 
 import java.net.URL;
 import java.util.List;
 import java.util.Map;
 import java.util.ResourceBundle;
 import java.util.concurrent.CompletableFuture;
+import java.nio.file.Files;
+import java.io.BufferedWriter;
+import com.google.gson.Gson;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
 
 public class FilesViewController implements Initializable {
     
@@ -122,7 +129,7 @@ public class FilesViewController implements Initializable {
                         FileInfo fileInfo = new FileInfo(
                             (String) fileData.get("name"),
                             (String) fileData.get("path"),
-                            (Long) fileData.get("size"),
+                            ((Number) fileData.get("size")).longValue(),
                             (String) fileData.get("extension"),
                             (String) fileData.get("category"),
                             (String) fileData.get("modified")
@@ -159,7 +166,7 @@ public class FilesViewController implements Initializable {
         String info = String.format("Scan: %s | %s archivos | %s", 
             scanResult.get("scan_id"),
             scanResult.get("total_files"),
-            formatFileSize((Long) scanResult.get("total_size")));
+            formatFileSize(((Number) scanResult.get("total_size")).longValue()));
         lblScanInfo.setText(info);
     }
     
@@ -186,14 +193,84 @@ public class FilesViewController implements Initializable {
     
     @FXML
     private void exportCsv() {
-        // TODO: Implement CSV export
-        showAlert("Exportar CSV", "Funcionalidad de exportación CSV próximamente...");
+        try {
+            FileChooser fileChooser = new FileChooser();
+            fileChooser.setTitle("Exportar archivos a CSV");
+            fileChooser.getExtensionFilters().addAll(
+                new FileChooser.ExtensionFilter("CSV Files", "*.csv"),
+                new FileChooser.ExtensionFilter("All Files", "*.*")
+            );
+            fileChooser.setInitialFileName("scan_files_" + scanId + ".csv");
+            
+            java.io.File selectedFile = fileChooser.showSaveDialog(new Stage());
+            if (selectedFile != null) {
+                try (BufferedWriter writer = Files.newBufferedWriter(selectedFile.toPath())) {
+                    // CSV Header
+                    writer.write("name,path,size,extension,category,modified\n");
+                    
+                    // Write file data
+                    for (FileInfo file : allFiles) {
+                        writer.write(String.format("%s,%s,%d,%s,%s,%s%n",
+                            escapeCsv(file.getName()),
+                            escapeCsv(file.getPath()),
+                            file.getSize(),
+                            escapeCsv(file.getExtension()),
+                            escapeCsv(file.getCategory()),
+                            escapeCsv(file.getModified())
+                        ));
+                    }
+                }
+                showAlert("Éxito", "Archivo CSV exportado correctamente");
+            }
+        } catch (Exception e) {
+            showAlert("Error", "No se pudo exportar a CSV: " + e.getMessage());
+        }
     }
     
     @FXML
     private void exportJson() {
-        // TODO: Implement JSON export
-        showAlert("Exportar JSON", "Funcionalidad de exportación JSON próximamente...");
+        try {
+            FileChooser fileChooser = new FileChooser();
+            fileChooser.setTitle("Exportar archivos a JSON");
+            fileChooser.getExtensionFilters().addAll(
+                new FileChooser.ExtensionFilter("JSON Files", "*.json"),
+                new FileChooser.ExtensionFilter("All Files", "*.*")
+            );
+            fileChooser.setInitialFileName("scan_files_" + scanId + ".json");
+            
+            java.io.File selectedFile = fileChooser.showSaveDialog(new Stage());
+            if (selectedFile != null) {
+                Gson gson = new Gson();
+                JsonArray filesArray = new JsonArray();
+                
+                for (FileInfo file : allFiles) {
+                    JsonObject fileObj = new JsonObject();
+                    fileObj.addProperty("name", file.getName());
+                    fileObj.addProperty("path", file.getPath());
+                    fileObj.addProperty("size", file.getSize());
+                    fileObj.addProperty("extension", file.getExtension());
+                    fileObj.addProperty("category", file.getCategory());
+                    fileObj.addProperty("modified", file.getModified());
+                    filesArray.add(fileObj);
+                }
+                
+                JsonObject root = new JsonObject();
+                root.addProperty("scan_id", scanId);
+                root.addProperty("export_date", new java.util.Date().toString());
+                root.addProperty("total_files", allFiles.size());
+                root.add("files", filesArray);
+                
+                Files.writeString(selectedFile.toPath(), gson.toJson(root));
+                showAlert("Éxito", "Archivo JSON exportado correctamente");
+            }
+        } catch (Exception e) {
+            showAlert("Error", "No se pudo exportar a JSON: " + e.getMessage());
+        }
+    }
+    
+    private String escapeCsv(String value) {
+        if (value == null) return "";
+        return value.replace("\"", "\"\"").replace(",", ";").replace("\n", " ");
     }
     
     @FXML

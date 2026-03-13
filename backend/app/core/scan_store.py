@@ -35,52 +35,63 @@ class ScanStore:
         
         self._scan_results: Dict[str, ScanResult] = {}
         self._scan_progress: Dict[str, ScanProgress] = {}
+        self._rlock = Lock()  # Add reentrant lock for thread safety
         self._initialized = True
         logger.debug("ScanStore singleton initialized")
     
     # Scan Results Management
     def get_scan_result(self, scan_id: str) -> Optional[ScanResult]:
         """Get scan result by ID"""
-        return self._scan_results.get(scan_id)
+        with self._rlock:
+            return self._scan_results.get(scan_id)
     
     def set_scan_result(self, scan_id: str, result: ScanResult) -> None:
         """Set scan result"""
-        self._scan_results[scan_id] = result
+        with self._rlock:
+            self._scan_results[scan_id] = result
         logger.debug(f"Stored scan result for {scan_id}")
     
     def remove_scan_result(self, scan_id: str) -> Optional[ScanResult]:
         """Remove and return scan result"""
-        return self._scan_results.pop(scan_id, None)
+        with self._rlock:
+            return self._scan_results.pop(scan_id, None)
     
     def has_scan_result(self, scan_id: str) -> bool:
         """Check if scan result exists"""
-        return scan_id in self._scan_results
+        with self._rlock:
+            return scan_id in self._scan_results
     
     def get_all_scan_results(self) -> Dict[str, ScanResult]:
         """Get all scan results"""
-        return self._scan_results.copy()
+        with self._rlock:
+            return self._scan_results.copy()
     
     # Scan Progress Management
     def get_scan_progress(self, scan_id: str) -> Optional[ScanProgress]:
         """Get scan progress by ID"""
-        return self._scan_progress.get(scan_id)
+        with self._rlock:
+            return self._scan_progress.get(scan_id)
     
     def set_scan_progress(self, scan_id: str, progress: ScanProgress) -> None:
         """Set scan progress"""
-        self._scan_progress[scan_id] = progress
+        with self._rlock:
+            self._scan_progress[scan_id] = progress
         logger.debug(f"Stored scan progress for {scan_id}")
     
     def remove_scan_progress(self, scan_id: str) -> Optional[ScanProgress]:
         """Remove and return scan progress"""
-        return self._scan_progress.pop(scan_id, None)
+        with self._rlock:
+            return self._scan_progress.pop(scan_id, None)
     
     def has_scan_progress(self, scan_id: str) -> bool:
         """Check if scan progress exists"""
-        return scan_id in self._scan_progress
+        with self._rlock:
+            return scan_id in self._scan_progress
     
     def get_all_scan_progress(self) -> Dict[str, ScanProgress]:
         """Get all scan progress"""
-        return self._scan_progress.copy()
+        with self._rlock:
+            return self._scan_progress.copy()
     
     # Combined Operations
     def remove_scan(self, scan_id: str) -> tuple[Optional[ScanResult], Optional[ScanProgress]]:
@@ -91,8 +102,9 @@ class ScanStore:
     
     def get_scan_info(self, scan_id: str) -> Optional[Dict]:
         """Get combined scan information"""
-        progress = self.get_scan_progress(scan_id)
-        result = self.get_scan_result(scan_id)
+        with self._rlock:
+            progress = self.get_scan_progress(scan_id)
+            result = self.get_scan_result(scan_id)
         
         if not progress and not result:
             return None
@@ -119,7 +131,8 @@ class ScanStore:
     
     def get_all_scans_info(self) -> list[Dict]:
         """Get information for all scans"""
-        all_scan_ids = set(self._scan_progress.keys()) | set(self._scan_results.keys())
+        with self._rlock:
+            all_scan_ids = set(self._scan_progress.keys()) | set(self._scan_results.keys())
         scans_info = []
         
         for scan_id in all_scan_ids:
@@ -134,19 +147,22 @@ class ScanStore:
     # Batch Operations
     def clear_all(self) -> None:
         """Clear all scan data"""
-        self._scan_results.clear()
-        self._scan_progress.clear()
+        with self._rlock:
+            self._scan_results.clear()
+            self._scan_progress.clear()
         logger.info("Cleared all scan data from store")
     
     def get_completed_scans_count(self) -> int:
         """Get count of completed scans"""
-        return sum(1 for p in self._scan_progress.values() 
-                  if p.status == ScanStatus.COMPLETED)
+        with self._rlock:
+            return sum(1 for p in self._scan_progress.values() 
+                      if p.status == ScanStatus.COMPLETED)
     
     def get_running_scans_count(self) -> int:
         """Get count of running scans"""
-        return sum(1 for p in self._scan_progress.values() 
-                  if p.status == ScanStatus.RUNNING)
+        with self._rlock:
+            return sum(1 for p in self._scan_progress.values() 
+                      if p.status == ScanStatus.RUNNING)
 
 
 # Global singleton instance

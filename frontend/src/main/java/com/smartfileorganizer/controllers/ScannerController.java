@@ -17,6 +17,7 @@ import javafx.scene.control.Dialog;
 import javafx.scene.control.TreeView;
 import javafx.scene.control.TreeItem;
 import javafx.scene.Node;
+import com.smartfileorganizer.utils.UIUtils;
 
 import java.io.File;
 import java.net.URL;
@@ -136,7 +137,7 @@ public class ScannerController implements Initializable {
     @FXML
     private void browseFolder() {
         try {
-            // Cargar unidades disponibles
+            // Usar el nuevo endpoint de validación de rutas
             var drives = apiClient.getAvailableDrives();
             
             // Mostrar diálogo de selección personalizado
@@ -146,7 +147,7 @@ public class ScannerController implements Initializable {
             // Fallback al diálogo nativo si falla la API
             DirectoryChooser directoryChooser = new DirectoryChooser();
             directoryChooser.setTitle("Seleccionar Carpeta");
-
+            
             String currentPath = txtFolderPath.getText();
             if (currentPath != null && !currentPath.trim().isEmpty()) {
                 File currentDir = new File(currentPath);
@@ -154,7 +155,7 @@ public class ScannerController implements Initializable {
                     directoryChooser.setInitialDirectory(currentDir);
                 }
             }
-
+            
             File selectedDirectory = directoryChooser.showDialog(getStage());
             if (selectedDirectory != null) {
                 txtFolderPath.setText(selectedDirectory.getAbsolutePath());
@@ -184,11 +185,27 @@ public class ScannerController implements Initializable {
             @Override
             public String toString(Map<String, Object> drive) {
                 String name = (String) drive.get("name");
-                Long freeSpace = (Long) drive.get("free_space");
+                Long freeSpace = ((Number) drive.get("free_space")).longValue();
                 Boolean isRemovable = (Boolean) drive.get("is_removable");
                 String filesystem = (String) drive.get("filesystem");
                 
-                StringBuilder display = new StringBuilder(name);
+                // Mejorar nombres de rutas WSL para mostrar nombres más amigables
+                String displayName = name;
+                if (name.contains("/host/parent-distro/mnt/host/wsl/")) {
+                    // Extraer nombre amigable de la ruta WSL
+                    String[] parts = name.split("/");
+                    if (parts.length > 0) {
+                        displayName = parts[parts.length - 1];  // Última parte de la ruta
+                    }
+                } else if (name.startsWith("/host/")) {
+                    // Para otras rutas de host, mostrar el último directorio
+                    String[] parts = name.split("/");
+                    if (parts.length > 1) {
+                        displayName = parts[parts.length - 1];
+                    }
+                }
+                
+                StringBuilder display = new StringBuilder(displayName);
                 
                 if (isRemovable != null && isRemovable) {
                     display.append(" (USB)");
@@ -227,7 +244,7 @@ public class ScannerController implements Initializable {
         if (!drives.isEmpty()) {
             driveCombo.getSelectionModel().selectFirst();
         }
-
+        
         content.getChildren().addAll(
             new Label("Unidad:"),
             driveCombo,
@@ -285,7 +302,7 @@ public class ScannerController implements Initializable {
                         if ((Boolean) folder.get("is_directory")) {
                             String folderPath = (String) folder.get("path");
                             String folderName = (String) folder.get("name");
-                            Integer fileCount = (Integer) folder.get("file_count");
+                            Integer fileCount = ((Number) folder.get("file_count")).intValue();
                             
                             // Handle permission error folders
                             String displayName = folderName;
@@ -347,7 +364,7 @@ public class ScannerController implements Initializable {
                         if ((Boolean) folder.get("is_directory")) {
                             String folderPath = (String) folder.get("path");
                             String folderName = (String) folder.get("name");
-                            Integer fileCount = (Integer) folder.get("file_count");
+                            Integer fileCount = ((Number) folder.get("file_count")).intValue();
                             
                             PathItem pathItem = new PathItem(
                                 folderName + (fileCount != null ? " (" + fileCount + " archivos)" : ""),
@@ -381,7 +398,7 @@ public class ScannerController implements Initializable {
                 lblStatus.setText("Ruta válida para escaneo");
                 lblStatus.setStyle("-fx-text-fill: #10B981;");
                 
-                Integer estimatedFiles = (Integer) validation.get("estimated_files");
+                Integer estimatedFiles = ((Number) validation.get("estimated_files")).intValue();
                 if (estimatedFiles != null) {
                     lblStatus.setText(lblStatus.getText() + " (~" + FormatUtils.formatNumber(estimatedFiles) + " archivos)");
                 }
@@ -475,7 +492,9 @@ public class ScannerController implements Initializable {
                     scan.get("scan_id").toString(),
                     scan.get("status").toString(),
                     Integer.parseInt(scan.get("files_found").toString()),
-                    FormatUtils.formatDate(java.time.LocalDateTime.now())
+                    FormatUtils.formatDate(java.time.LocalDateTime.now()),
+                    scanList,
+                    apiClient
                 ));
             }
         } catch (Exception e) {
@@ -486,8 +505,7 @@ public class ScannerController implements Initializable {
     @FXML
     private void viewFiles() {
         if (currentScanId != null) {
-            // TODO: Navegar a vista de archivos
-            showAlert("Info", "Función de ver archivos próximamente...");
+            UIUtils.showFilesView(currentScanId, "completed");
         }
     }
 
