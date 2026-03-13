@@ -18,6 +18,7 @@ import javafx.scene.control.TreeView;
 import javafx.scene.control.TreeItem;
 import javafx.scene.Node;
 import com.smartfileorganizer.utils.UIUtils;
+import com.smartfileorganizer.utils.ConcurrencyUtils;
 
 import java.io.File;
 import java.net.URL;
@@ -164,6 +165,12 @@ public class ScannerController implements Initializable {
     }
 
     private void showFolderSelectionDialog(List<Map<String, Object>> drives) {
+        // Check if drives list is empty
+        if (drives == null || drives.isEmpty()) {
+            showAlert("Error", "No se detectaron unidades disponibles. Verifica que el backend esté corriendo.");
+            return;
+        }
+        
         // Crear diálogo personalizado para seleccionar carpetas
         Dialog<String> dialog = new Dialog<>();
         dialog.setTitle("Seleccionar Carpeta para Escanear");
@@ -424,35 +431,51 @@ public class ScannerController implements Initializable {
             return;
         }
 
-        try {
-            // Reset completion flag
-            scanCompleted = false;
-            
-            // Iniciar escaneo
-            currentScanId = apiClient.startScan(
-                path, 
-                spinnerMaxDepth.getValue(), 
-                chkIncludeHidden.isSelected()
-            );
+        // Disable UI immediately to prevent multiple clicks
+        btnStartScan.setDisable(true);
+        btnStopScan.setDisable(false);
+        progressSection.setVisible(true);
+        progressSection.setManaged(true);
+        resultsSection.setVisible(false);
+        resultsSection.setManaged(false);
+        lblStatus.setText("Iniciando escaneo...");
 
-            // Actualizar UI
-            btnStartScan.setDisable(true);
-            btnStopScan.setDisable(false);
-            progressSection.setVisible(true);
-            progressSection.setManaged(true);
-            resultsSection.setVisible(false);
-            resultsSection.setManaged(false);
-            lblStatus.setText("Escaneando...");
+        // Run scan initiation in background thread
+        ConcurrencyUtils.runAsync(() -> {
+            try {
+                // Reset completion flag
+                scanCompleted = false;
+                
+                // Iniciar escaneo
+                currentScanId = apiClient.startScan(
+                    path, 
+                    spinnerMaxDepth.getValue(), 
+                    chkIncludeHidden.isSelected()
+                );
 
-            // Iniciar monitoreo de progreso
-            startProgressMonitoring();
+                // Update UI on main thread
+                Platform.runLater(() -> {
+                    lblStatus.setText("Escaneando...");
+                    
+                    // Iniciar monitoreo de progreso
+                    startProgressMonitoring();
 
-            // Refrescar lista de escaneos
-            refreshScans();
+                    // Refrescar lista de escaneos
+                    refreshScans();
+                });
 
-        } catch (Exception e) {
-            showAlert("Error", "No se pudo iniciar el escaneo: " + e.getMessage());
-        }
+            } catch (Exception e) {
+                Platform.runLater(() -> {
+                    // Reset UI on error
+                    btnStartScan.setDisable(false);
+                    btnStopScan.setDisable(true);
+                    progressSection.setVisible(false);
+                    progressSection.setManaged(false);
+                    lblStatus.setText("Error");
+                    showAlert("Error", "No se pudo iniciar el escaneo: " + e.getMessage());
+                });
+            }
+        });
     }
 
     @FXML
@@ -483,23 +506,29 @@ public class ScannerController implements Initializable {
 
     @FXML
     private void refreshScans() {
-        try {
-            var scans = apiClient.listScans();
-            scanList.clear();
-            
-            for (var scan : scans) {
-                scanList.add(new ScanInfo(
-                    scan.get("scan_id").toString(),
-                    scan.get("status").toString(),
-                    Integer.parseInt(scan.get("files_found").toString()),
-                    FormatUtils.formatDate(java.time.LocalDateTime.now()),
-                    scanList,
-                    apiClient
-                ));
+        // Run in background to prevent UI freezing
+        ConcurrencyUtils.runAsync(() -> {
+            try {
+                var scans = apiClient.listScans();
+                
+                Platform.runLater(() -> {
+                    scanList.clear();
+                    
+                    for (var scan : scans) {
+                        scanList.add(new ScanInfo(
+                            scan.get("scan_id").toString(),
+                            scan.get("status").toString(),
+                            Integer.parseInt(scan.get("files_found").toString()),
+                            FormatUtils.formatDate(java.time.LocalDateTime.now()),
+                            scanList,
+                            apiClient
+                        ));
+                    }
+                });
+            } catch (Exception e) {
+                System.err.println("Error refrescando escaneos: " + e.getMessage());
             }
-        } catch (Exception e) {
-            System.err.println("Error refrescando escaneos: " + e.getMessage());
-        }
+        });
     }
 
     @FXML
@@ -591,20 +620,27 @@ public class ScannerController implements Initializable {
     }
     
     private void showResultsFromWs() {
-        try {
-            var result = apiClient.getScanResult(currentScanId);
-            
-            lblTotalFiles.setText(String.format("%,d", result.getTotalFiles()));
-            lblTotalSize.setText(FormatUtils.formatFileSize(result.getTotalSize()));
-            lblScanTime.setText(String.format("%.1fs", result.getDurationSec()));
-            lblScanId.setText(currentScanId);
-            
-            resultsSection.setVisible(true);
-            resultsSection.setManaged(true);
-            
-        } catch (Exception e) {
-            showAlert("Error", "Error obteniendo resultados: " + e.getMessage());
-        }
+        // Run in background to prevent UI freezing
+        ConcurrencyUtils.runAsync(() -> {
+            try {
+                var result = apiClient.getScanResult(currentScanId);
+                
+                Platform.runLater(() -> {
+                    lblTotalFiles.setText(String.format("%,d", result.getTotalFiles()));
+                    lblTotalSize.setText(FormatUtils.formatFileSize(result.getTotalSize()));
+                    lblScanTime.setText(String.format("%.1fs", result.getDurationSec()));
+                    lblScanId.setText(currentScanId);
+                    
+                    resultsSection.setVisible(true);
+                    resultsSection.setManaged(true);
+                });
+                
+            } catch (Exception e) {
+                Platform.runLater(() -> {
+                    showAlert("Error", "Error obteniendo resultados: " + e.getMessage());
+                });
+            }
+        });
     }
 
     private void updateProgressUI(ScanProgress progress) {
@@ -615,21 +651,28 @@ public class ScannerController implements Initializable {
     }
 
     private void showResults(ScanProgress progress) {
-        try {
-            var result = apiClient.getScanResult(currentScanId);
-            
-            lblTotalFiles.setText(String.format("%,d", result.getTotalFiles()));
-            lblTotalSize.setText(FormatUtils.formatFileSize(result.getTotalSize()));
-            lblScanTime.setText(String.format("%.1fs", result.getDurationSec()));
-            lblScanId.setText(currentScanId);
-            
-            resultsSection.setVisible(true);
-            resultsSection.setManaged(true);
-            lblStatus.setText("Completado");
-            
-        } catch (Exception e) {
-            showAlert("Error", "Error obteniendo resultados: " + e.getMessage());
-        }
+        // Run in background to prevent UI freezing
+        ConcurrencyUtils.runAsync(() -> {
+            try {
+                var result = apiClient.getScanResult(currentScanId);
+                
+                Platform.runLater(() -> {
+                    lblTotalFiles.setText(String.format("%,d", result.getTotalFiles()));
+                    lblTotalSize.setText(FormatUtils.formatFileSize(result.getTotalSize()));
+                    lblScanTime.setText(String.format("%.1fs", result.getDurationSec()));
+                    lblScanId.setText(currentScanId);
+                    
+                    resultsSection.setVisible(true);
+                    resultsSection.setManaged(true);
+                    lblStatus.setText("Completado");
+                });
+                
+            } catch (Exception e) {
+                Platform.runLater(() -> {
+                    showAlert("Error", "Error obteniendo resultados: " + e.getMessage());
+                });
+            }
+        });
     }
 
     private Stage getStage() {

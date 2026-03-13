@@ -2,6 +2,7 @@ com\smartfileorganizer\controllers\FilesViewController$1.class
 com\smartfileorganizer\models\DuplicateGroup.class
 com\smartfileorganizer\models\LargeFile.class
 com\smartfileorganizer\models\CategoryStats.class
+com\smartfileorganizer\utils\ConcurrencyUtils.class
 com\smartfileorganizer\utils\FormatUtils.class
 com\smartfileorganizer\controllers\DashboardController.class
 com\smartfileorganizer\controllers\MainController.class
@@ -10,11 +11,13 @@ com\smartfileorganizer\models\RecentScan.class
 com\smartfileorganizer\models\ScanProgress.class
 com\smartfileorganizer\api\ApiClient$1.class
 com\smartfileorganizer\controllers\FilesViewController$FileInfo.class
+com\smartfileorganizer\utils\ConcurrencyUtils$1.class
 com\smartfileorganizer\controllers\ScannerController$1.class
 com\smartfileorganizer\models\ScanResult.class
 com\smartfileorganizer\controllers\DuplicatesController.class
 com\smartfileorganizer\controllers\PathItem.class
 com\smartfileorganizer\utils\UIUtils.class
+com\smartfileorganizer\utils\ConcurrencyUtils$2.class
 com\smartfileorganizer\controllers\StatsController.class
 com\smartfileorganizer\api\ApiClient.class
 com\smartfileorganizer\models\ScanInfo.class

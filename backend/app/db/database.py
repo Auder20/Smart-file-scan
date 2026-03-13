@@ -257,6 +257,22 @@ def delete_scan_data(scan_id: str) -> None:
         logger.error(f"Failed to delete scan data for {scan_id}: {e}")
         raise
 
+def get_scans() -> List[Dict[str, Any]]:
+    """Get all scans"""
+    try:
+        with get_db_cursor() as cursor:
+            cursor.execute("""
+                SELECT scan_id, root_path, status, total_files, total_size, 
+                       scanned_at, duration_sec
+                FROM scans 
+                ORDER BY scanned_at DESC
+            """)
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+    except Exception as e:
+        logger.error(f"Failed to get scans: {e}")
+        return []
+
 def get_scan_statistics(scan_id: str) -> Optional[Dict[str, Any]]:
     """Get statistics for a scan"""
     try:

@@ -23,6 +23,7 @@ public class ApiClient {
     private static final OkHttpClient client = new OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(300, TimeUnit.SECONDS)
+        .writeTimeout(300, TimeUnit.SECONDS)  // Add write timeout for large uploads
         .build();
 
     private static final MediaType JSON = MediaType.get("application/json");

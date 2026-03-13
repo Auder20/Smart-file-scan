@@ -26,6 +26,7 @@ import com.smartfileorganizer.models.DuplicateFile;
 import com.smartfileorganizer.models.DuplicateGroup;
 import com.smartfileorganizer.utils.FormatUtils;
 import com.smartfileorganizer.utils.UIUtils;
+import com.smartfileorganizer.utils.ConcurrencyUtils;
 
 public class DuplicatesController implements Initializable {
 
@@ -43,7 +44,7 @@ public class DuplicatesController implements Initializable {
     // ── Filters + actions ─────────────────────────────────────────────────────
     @FXML private TextField        txtFilter;
     @FXML private ComboBox<String> comboSizeFilter;
-    @FXML private ComboBox<String> comboCategoryFilter;  // FEAT 4: Category filter
+    // @FXML private ComboBox<String> comboCategoryFilter;  // FEAT 4: Category filter - disabled for now
     @FXML private CheckBox         chkShowOnlyLarge;
     @FXML private Button           btnSelectAll;
     @FXML private Button           btnDeselectAll;
@@ -86,6 +87,15 @@ public class DuplicatesController implements Initializable {
     @Override
     public void initialize(URL url, ResourceBundle rb) {
         apiClient = new ApiClient();
+        
+        // Initialize UI components first
+        if (comboScanId != null) {
+            comboScanId.setItems(FXCollections.observableArrayList());
+        }
+        if (comboSizeFilter != null) {
+            comboSizeFilter.setItems(FXCollections.observableArrayList());
+        }
+        
         setupTable();
         setupFilters();
         loadAvailableScans();
@@ -131,52 +141,47 @@ public class DuplicatesController implements Initializable {
         ));
         comboSizeFilter.getSelectionModel().selectFirst();
 
-        // FEAT 4: Setup category filter
-        comboCategoryFilter.setItems(FXCollections.observableArrayList(
-            "Todas", "Documentos", "Imágenes", "Videos", "Audio", "Código", "Otros"
-        ));
-        comboCategoryFilter.getSelectionModel().selectFirst();
+        // Category filter is not implemented yet - skip for now
+        // comboCategoryFilter.setItems(FXCollections.observableArrayList(
+        //     "Todas", "Documentos", "Imágenes", "Videos", "Audio", "Código", "Otros"
+        // ));
+        // comboCategoryFilter.getSelectionModel().selectFirst();
 
         txtFilter.textProperty().addListener((obs, o, n) -> applyFilters());
         comboSizeFilter.getSelectionModel().selectedItemProperty().addListener((obs, o, n) -> applyFilters());
-        comboCategoryFilter.getSelectionModel().selectedItemProperty().addListener((obs, o, n) -> applyFilters());  // FEAT 4
+        // comboCategoryFilter.getSelectionModel().selectedItemProperty().addListener((obs, o, n) -> applyFilters());  // FEAT 4
         chkShowOnlyLarge.selectedProperty().addListener((obs, o, n) -> applyFilters());
     }
 
     private void applyFilters() {
         String text      = txtFilter.getText().toLowerCase().trim();
         String sizeRange = comboSizeFilter.getSelectionModel().getSelectedItem();
-        String category  = comboCategoryFilter.getSelectionModel().getSelectedItem();  // FEAT 4
         boolean onlyLarge = chkShowOnlyLarge.isSelected();
 
         filteredDuplicates.setPredicate(file -> {
-            if (!text.isEmpty() &&
-                !file.getFileName().toLowerCase().contains(text) &&
-                !file.getPath().toLowerCase().contains(text))
-                return false;
-
-            if (sizeRange != null && !"Todos".equals(sizeRange)) {
-                long b = file.getSizeBytes();
-                switch (sizeRange) {
-                    case "< 1 MB"      -> { if (b >= 1_048_576)                         return false; }
-                    case "1–10 MB"     -> { if (b < 1_048_576 || b >= 10_485_760)       return false; }
-                    case "10–100 MB"   -> { if (b < 10_485_760 || b >= 104_857_600)     return false; }
-                    case "> 100 MB"    -> { if (b < 104_857_600)                         return false; }
-                }
-            }
-
-            // FEAT 4: Category filter
-            if (category != null && !"Todas".equals(category)) {
-                String fileCategory = getFileCategory(file.getFileName());
-                if (!category.equalsIgnoreCase(fileCategory)) {
-                    return false;
-                }
-            }
-
-            if (onlyLarge && file.getSizeBytes() < 10_485_760) return false;
-
-            return true;
+            boolean matchesText = text.isEmpty() || 
+                file.getFileName().toLowerCase().contains(text) || 
+                file.getPath().toLowerCase().contains(text);
+            
+            boolean matchesSize = sizeRange == null || sizeRange.equals("Todos") || checkSizeRange(file, sizeRange);
+            
+            boolean matchesCategory = true;  // Always true for now (category filter disabled)
+            
+            return matchesText && matchesSize && matchesCategory && (!onlyLarge || file.getSizeBytes() > 10_000_000);
         });
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private boolean checkSizeRange(DuplicateFile file, String sizeRange) {
+        long sizeBytes = file.getSizeBytes();
+        return switch (sizeRange) {
+            case "< 1 MB" -> sizeBytes < 1_000_000;
+            case "1–10 MB" -> sizeBytes >= 1_000_000 && sizeBytes <= 10_000_000;
+            case "10–100 MB" -> sizeBytes > 10_000_000 && sizeBytes <= 100_000_000;
+            case "> 100 MB" -> sizeBytes > 100_000_000;
+            default -> true; // "Todos" or null
+        };
     }
 
     // FEAT 4: Helper method to get file category based on extension
@@ -200,22 +205,30 @@ public class DuplicatesController implements Initializable {
     // ── Load scans ────────────────────────────────────────────────────────────
 
     private void loadAvailableScans() {
-        apiClient.listAllScansAsync()
-            .thenAccept(scans -> Platform.runLater(() -> {
-                scanList.clear();
-                for (Map<String, Object> s : scans) {
-                    if ("completed".equals(s.get("status"))) {
-                        scanList.add(s.get("scan_id").toString());
+        ConcurrencyUtils.runAsync(() -> {
+            try {
+                var scans = apiClient.listScans();
+                
+                Platform.runLater(() -> {
+                    scanList.clear();
+                    for (Map<String, Object> s : scans) {
+                        if ("completed".equals(s.get("status"))) {
+                            scanList.add(s.get("scan_id").toString());
+                        }
                     }
-                }
-                comboScanId.setItems(scanList);
-                if (!scanList.isEmpty()) comboScanId.getSelectionModel().selectFirst();
-            }))
-            .exceptionally(ex -> {
+                    
+                    if (comboScanId != null) {
+                        comboScanId.setItems(scanList);
+                        if (!scanList.isEmpty()) {
+                            comboScanId.getSelectionModel().selectFirst();
+                        }
+                    }
+                });
+            } catch (Exception e) {
                 Platform.runLater(() ->
-                    UIUtils.showErrorDialog("Error", "No se pudieron cargar los escaneos: " + ex.getMessage()));
-                return null;
-            });
+                    UIUtils.showErrorDialog("Error", "No se pudieron cargar los escaneos: " + e.getMessage()));
+            }
+        });
     }
 
     // ── Refresh duplicates ────────────────────────────────────────────────────

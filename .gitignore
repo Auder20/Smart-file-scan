@@ -42,3 +42,5 @@ htmlcov/
 # Docker
 .dockerenv
 ```
+docs/SmartFileOrganizer_Architecture.DOCX
+frontend/target/

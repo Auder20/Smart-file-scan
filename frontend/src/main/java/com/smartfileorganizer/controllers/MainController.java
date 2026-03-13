@@ -71,12 +71,21 @@ public class MainController implements Initializable {
 
     private void loadView(String fxmlPath, String fallbackTitle) {
         try {
+            System.out.println("Loading view: " + fxmlPath);
             FXMLLoader loader = new FXMLLoader(getClass().getResource(fxmlPath));
+            
+            // Debug: Check if resource exists
+            if (loader.getLocation() == null) {
+                throw new RuntimeException("FXML file not found: " + fxmlPath);
+            }
+            
             Node view = loader.load();
             view.getProperties().put("mainController", this);
             contentArea.getChildren().setAll(view);
+            System.out.println("Successfully loaded view: " + fxmlPath);
         } catch (Exception e) {
             // Imprime el error completo en consola
+            System.err.println("Error loading view " + fxmlPath + ":");
             e.printStackTrace();
             contentArea.getChildren().setAll(buildErrorPlaceholder(fallbackTitle, e.getMessage()));
         }

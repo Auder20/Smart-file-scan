@@ -9,6 +9,7 @@ D:\smart-file-organizer\frontend\src\main\java\com\smartfileorganizer\controller
 D:\smart-file-organizer\frontend\src\main\java\com\smartfileorganizer\models\DuplicateFile.java
 D:\smart-file-organizer\frontend\src\main\java\com\smartfileorganizer\utils\FormatUtils.java
 D:\smart-file-organizer\frontend\src\main\java\com\smartfileorganizer\utils\UIUtils.java
+D:\smart-file-organizer\frontend\src\main\java\com\smartfileorganizer\utils\ConcurrencyUtils.java
 D:\smart-file-organizer\frontend\src\main\java\com\smartfileorganizer\models\ScanResult.java
 D:\smart-file-organizer\frontend\src\main\java\com\smartfileorganizer\models\ScanProgress.java
 D:\smart-file-organizer\frontend\src\main\java\com\smartfileorganizer\models\LargeFile.java
