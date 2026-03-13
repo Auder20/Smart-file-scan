@@ -7,11 +7,24 @@ services:
       - "8000:8000"
     volumes:
       - ./backend:/app
-      # Montar todo el sistema de archivos del host como solo lectura
+      # IMPROVEMENT: Mount the entire host filesystem for Docker mode
+      # This allows the app to scan all drives on the host system
       - /:/host:ro
+      # Also mount as read-write for file operations (delete, move, etc.)
+      - /:/host_rw
     environment:
       - HOST_ROOT=/host
+      - HOST_ROOT_RW=/host_rw
+      # Allow connections from frontend and localhost
+      - ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000,http://localhost:8080,http://127.0.0.1:8080
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    # IMPROVEMENT: Add health check for better container management
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
   frontend:
     container_name: java_dev
@@ -21,6 +34,8 @@ services:
       - "8080:8080"
     volumes:
       - ./frontend:/app
+    depends_on:
+      - backend
     command: tail -f /dev/null
 
 # FOR DEVELOPMENT ONLY - end users run build-*.sh or build-win.bat
