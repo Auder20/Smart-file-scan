@@ -23,8 +23,6 @@ import com.smartfileorganizer.utils.ConcurrencyUtils;
 import java.io.File;
 import java.net.URL;
 import java.util.ResourceBundle;
-import java.util.Timer;
-import java.util.TimerTask;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -36,80 +34,54 @@ import com.smartfileorganizer.models.ScanProgress;
 import com.smartfileorganizer.utils.FormatUtils;
 import com.google.gson.JsonObject;
 
-// Helper class to store both display name and full path
-class PathItem {
-    private final String displayName;
-    private final String fullPath;
-    
-    public PathItem(String displayName, String fullPath) {
-        this.displayName = displayName;
-        this.fullPath = fullPath;
-    }
-    
-    public String getDisplayName() {
-        return displayName;
-    }
-    
-    public String getFullPath() {
-        return fullPath;
-    }
-    
-    @Override
-    public String toString() {
-        return displayName;
-    }
-}
-
 public class ScannerController implements Initializable {
 
-    @FXML private TextField txtFolderPath;
-    @FXML private Button btnBrowse;
-    @FXML private Spinner<Integer> spinnerMaxDepth;
-    @FXML private CheckBox chkIncludeHidden;
-    @FXML private Button btnStartScan;
-    @FXML private Button btnStopScan;
-    @FXML private Button btnRefresh;
-    @FXML private Label lblStatus;
-    
-    @FXML private VBox progressSection;
-    @FXML private ProgressBar progressBar;
-    @FXML private Label lblProgress;
-    @FXML private Label lblFilesFound;
-    @FXML private Label lblCurrentDir;
-    
-    @FXML private VBox resultsSection;
-    @FXML private Button btnViewFiles;
-    @FXML private Button btnExport;
-    @FXML private Label lblTotalFiles;
-    @FXML private Label lblTotalSize;
-    @FXML private Label lblScanTime;
-    @FXML private Label lblScanId;
-    
-    @FXML private TableView<ScanInfo> tableScans;
-    @FXML private TableColumn<ScanInfo, String> colScanId;
-    @FXML private TableColumn<ScanInfo, String> colStatus;
-    @FXML private TableColumn<ScanInfo, Integer> colFiles;
-    @FXML private TableColumn<ScanInfo, String> colDate;
-    @FXML private TableColumn<ScanInfo, javafx.scene.layout.HBox> colActions;  // FIX: Change to HBox type
+    // ── FXML fields ───────────────────────────────────────────────────────────
+
+    @FXML private TextField         txtFolderPath;
+    @FXML private Button            btnBrowse;
+    @FXML private Spinner<Integer>  spinnerMaxDepth;
+    @FXML private CheckBox          chkIncludeHidden;
+    @FXML private Button            btnStartScan;
+    @FXML private Button            btnStopScan;
+    @FXML private Button            btnRefresh;
+    @FXML private Label             lblStatus;
+    @FXML private VBox              progressSection;
+    @FXML private ProgressBar       progressBar;
+    @FXML private Label             lblProgress;
+    @FXML private Label             lblFilesFound;
+    @FXML private Label             lblCurrentDir;
+    @FXML private VBox              resultsSection;
+    @FXML private Button            btnViewFiles;
+    @FXML private Button            btnExport;
+    @FXML private Label             lblTotalFiles;
+    @FXML private Label             lblTotalSize;
+    @FXML private Label             lblScanTime;
+    @FXML private Label             lblScanId;
+    @FXML private TableView<ScanInfo>                              tableScans;
+    @FXML private TableColumn<ScanInfo, String>                    colScanId;
+    @FXML private TableColumn<ScanInfo, String>                    colStatus;
+    @FXML private TableColumn<ScanInfo, Integer>                   colFiles;
+    @FXML private TableColumn<ScanInfo, String>                    colDate;
+    @FXML private TableColumn<ScanInfo, javafx.scene.layout.HBox> colActions;
+
+    // ── State ─────────────────────────────────────────────────────────────────
 
     private ApiClient apiClient;
-    private Timer progressTimer;
-    private String currentScanId;
+    private String    currentScanId;
     private final ObservableList<ScanInfo> scanList = FXCollections.observableArrayList();
-    private boolean isWebSocketConnected = false;
-    private boolean scanCompleted = false;
+
+    private volatile boolean isScanning    = false;
+    private volatile boolean scanCompleted = false;
+    private volatile boolean wsConnected   = false;
+
+    // ── Init ──────────────────────────────────────────────────────────────────
 
     @Override
     public void initialize(URL url, ResourceBundle rb) {
         apiClient = new ApiClient();
-        
-        // Inicializar tabla
         setupTable();
-        
-        // Configurar listeners
         setupListeners();
-        
-        // Cargar escaneos existentes
         refreshScans();
     }
 
@@ -118,176 +90,114 @@ public class ScannerController implements Initializable {
         colStatus.setCellValueFactory(new PropertyValueFactory<>("status"));
         colFiles.setCellValueFactory(new PropertyValueFactory<>("filesFound"));
         colDate.setCellValueFactory(new PropertyValueFactory<>("date"));
-        colActions.setCellValueFactory(new PropertyValueFactory<>("actions"));  // FIX: Now works with HBox
-        
+        colActions.setCellValueFactory(new PropertyValueFactory<>("actions"));
         tableScans.setItems(scanList);
     }
 
     private void setupListeners() {
-        // Listener para el campo de ruta
-        txtFolderPath.textProperty().addListener((obs, oldVal, newVal) -> {
-            btnStartScan.setDisable(newVal == null || newVal.trim().isEmpty());
-        });
-
-        // Configurar spinner
-        SpinnerValueFactory.IntegerSpinnerValueFactory factory = 
+        txtFolderPath.textProperty().addListener((obs, o, n) ->
+            btnStartScan.setDisable(n == null || n.trim().isEmpty()));
+        SpinnerValueFactory.IntegerSpinnerValueFactory factory =
             new SpinnerValueFactory.IntegerSpinnerValueFactory(1, 50, 20);
         spinnerMaxDepth.setValueFactory(factory);
     }
 
+    // ── Browse ────────────────────────────────────────────────────────────────
+
     @FXML
     private void browseFolder() {
         try {
-            // Usar el nuevo endpoint de validación de rutas
-            var drives = apiClient.getAvailableDrives();
-            
-            // Mostrar diálogo de selección personalizado
+            List<Map<String, Object>> drives = apiClient.getAvailableDrives();
             showFolderSelectionDialog(drives);
-            
         } catch (Exception e) {
-            // Fallback al diálogo nativo si falla la API
-            DirectoryChooser directoryChooser = new DirectoryChooser();
-            directoryChooser.setTitle("Seleccionar Carpeta");
-            
-            String currentPath = txtFolderPath.getText();
-            if (currentPath != null && !currentPath.trim().isEmpty()) {
-                File currentDir = new File(currentPath);
-                if (currentDir.exists()) {
-                    directoryChooser.setInitialDirectory(currentDir);
-                }
+            DirectoryChooser dc = new DirectoryChooser();
+            dc.setTitle("Seleccionar Carpeta");
+            String current = txtFolderPath.getText();
+            if (current != null && !current.trim().isEmpty()) {
+                File dir = new File(current);
+                if (dir.exists()) dc.setInitialDirectory(dir);
             }
-            
-            File selectedDirectory = directoryChooser.showDialog(getStage());
-            if (selectedDirectory != null) {
-                txtFolderPath.setText(selectedDirectory.getAbsolutePath());
-            }
+            File selected = dc.showDialog(getStage());
+            if (selected != null) txtFolderPath.setText(selected.getAbsolutePath());
         }
     }
 
     private void showFolderSelectionDialog(List<Map<String, Object>> drives) {
-        // Check if drives list is empty
         if (drives == null || drives.isEmpty()) {
-            showAlert("Error", "No se detectaron unidades disponibles. Verifica que el backend esté corriendo.");
+            UIUtils.showErrorDialog("Error", "No se detectaron unidades disponibles.");
             return;
         }
-        
-        // Crear diálogo personalizado para seleccionar carpetas
+
         Dialog<String> dialog = new Dialog<>();
         dialog.setTitle("Seleccionar Carpeta para Escanear");
-        dialog.setHeaderText("Elige una unidad y luego navega hasta la carpeta deseada");
+        dialog.setHeaderText("Elige una unidad y navega hasta la carpeta deseada");
 
-        // Botones
-        ButtonType selectButtonType = new ButtonType("Seleccionar", ButtonBar.ButtonData.OK_DONE);
-        ButtonType cancelButtonType = new ButtonType("Cancelar", ButtonBar.ButtonData.CANCEL_CLOSE);
-        dialog.getDialogPane().getButtonTypes().addAll(selectButtonType, cancelButtonType);
+        ButtonType selectBT = new ButtonType("Seleccionar", ButtonBar.ButtonData.OK_DONE);
+        ButtonType cancelBT = new ButtonType("Cancelar",    ButtonBar.ButtonData.CANCEL_CLOSE);
+        dialog.getDialogPane().getButtonTypes().addAll(selectBT, cancelBT);
 
-        // Crear contenido del diálogo
         VBox content = new VBox(10);
         content.setPadding(new Insets(20));
 
-        // ComboBox para unidades
         ComboBox<Map<String, Object>> driveCombo = new ComboBox<>();
         driveCombo.getItems().addAll(drives);
         driveCombo.setConverter(new StringConverter<Map<String, Object>>() {
             @Override
-            public String toString(Map<String, Object> drive) {
-                String name = (String) drive.get("name");
-                Long freeSpace = ((Number) drive.get("free_space")).longValue();
-                Boolean isRemovable = (Boolean) drive.get("is_removable");
-                String filesystem = (String) drive.get("filesystem");
-                
-                // Mejorar nombres de rutas WSL para mostrar nombres más amigables
-                String displayName = name;
-                if (name.contains("/host/parent-distro/mnt/host/wsl/")) {
-                    // Extraer nombre amigable de la ruta WSL
-                    String[] parts = name.split("/");
-                    if (parts.length > 0) {
-                        displayName = parts[parts.length - 1];  // Última parte de la ruta
-                    }
-                } else if (name.startsWith("/host/")) {
-                    // Para otras rutas de host, mostrar el último directorio
-                    String[] parts = name.split("/");
-                    if (parts.length > 1) {
-                        displayName = parts[parts.length - 1];
-                    }
-                }
-                
-                StringBuilder display = new StringBuilder(displayName);
-                
-                if (isRemovable != null && isRemovable) {
-                    display.append(" (USB)");
-                }
-                
-                if (filesystem != null && !filesystem.isEmpty()) {
-                    display.append(" [").append(filesystem).append("]");
-                }
-                
-                if (freeSpace != null) {
-                    display.append(" (").append(FormatUtils.formatFileSize(freeSpace)).append(" libre)");
-                }
-                
-                return display.toString();
+            public String toString(Map<String, Object> d) {
+                if (d == null) return "";
+                String name = (String) d.get("name");
+                Object fs   = d.get("free_space");
+                Object rem  = d.get("is_removable");
+                Object fsys = d.get("filesystem");
+                StringBuilder sb = new StringBuilder(name != null ? name : "?");
+                if (Boolean.TRUE.equals(rem)) sb.append(" (USB)");
+                if (fsys != null && !fsys.toString().isEmpty())
+                    sb.append(" [").append(fsys).append("]");
+                if (fs instanceof Number)
+                    sb.append(" (")
+                      .append(FormatUtils.formatFileSize(((Number) fs).longValue()))
+                      .append(" libre)");
+                return sb.toString();
             }
-
             @Override
-            public Map<String, Object> fromString(String string) {
-                return null; // No necesario
-            }
+            public Map<String, Object> fromString(String s) { return null; }
         });
 
-        // TreeView para carpetas
         TreeView<PathItem> folderTree = new TreeView<>();
         folderTree.setPrefHeight(300);
         folderTree.setPrefWidth(400);
 
-        // Listener para seleccion de unidad
-        driveCombo.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, newVal) -> {
-            if (newVal != null) {
-                loadFolderTree(folderTree, (String) newVal.get("path"));
-            }
+        driveCombo.getSelectionModel().selectedItemProperty().addListener((obs, o, n) -> {
+            if (n != null) loadFolderTree(folderTree, (String) n.get("path"));
         });
+        if (!drives.isEmpty()) driveCombo.getSelectionModel().selectFirst();
 
-        // Seleccionar primera unidad por defecto
-        if (!drives.isEmpty()) {
-            driveCombo.getSelectionModel().selectFirst();
-        }
-        
         content.getChildren().addAll(
-            new Label("Unidad:"),
-            driveCombo,
-            new Label("Carpetas:"),
-            folderTree
+            new Label("Unidad:"), driveCombo,
+            new Label("Carpetas:"), folderTree
         );
-
         dialog.getDialogPane().setContent(content);
 
-        // Habilitar botón de selección solo cuando se selecciona una carpeta
-        Node selectButton = dialog.getDialogPane().lookupButton(selectButtonType);
-        selectButton.setDisable(true);
+        Node selectBtn = dialog.getDialogPane().lookupButton(selectBT);
+        selectBtn.setDisable(true);
+        folderTree.getSelectionModel().selectedItemProperty().addListener((obs, o, n) ->
+            selectBtn.setDisable(
+                n == null || "Loading...".equals(n.getValue().toString())
+            )
+        );
 
-        folderTree.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, newVal) -> {
-            selectButton.setDisable(newVal == null || newVal.getValue().toString().equals("Loading..."));
-        });
-
-        // Resultado
-        dialog.setResultConverter(dialogButton -> {
-            if (dialogButton == selectButtonType) {
-                TreeItem<PathItem> selectedItem = folderTree.getSelectionModel().getSelectedItem();
-                if (selectedItem != null) {
-                    PathItem pathItem = selectedItem.getValue();
-                    if (pathItem != null) {
-                        return pathItem.getFullPath();
-                    }
-                }
+        dialog.setResultConverter(bt -> {
+            if (bt == selectBT) {
+                TreeItem<PathItem> sel = folderTree.getSelectionModel().getSelectedItem();
+                if (sel != null && sel.getValue() != null)
+                    return sel.getValue().getFullPath();
             }
             return null;
         });
 
-        // Mostrar diálogo y procesar resultado
-        Optional<String> result = dialog.showAndWait();
-        result.ifPresent(selectedPath -> {
-            txtFolderPath.setText(selectedPath);
-            validateSelectedPath(selectedPath);
+        dialog.showAndWait().ifPresent(path -> {
+            txtFolderPath.setText(path);
+            validateSelectedPath(path);
         });
     }
 
@@ -296,65 +206,41 @@ public class ScannerController implements Initializable {
         treeView.setRoot(rootItem);
         rootItem.setExpanded(true);
 
-        // Cargar en background para no bloquear UI
         CompletableFuture.runAsync(() -> {
             try {
                 List<Map<String, Object>> folders = apiClient.exploreFolders(rootPath, false, 2);
-                
                 Platform.runLater(() -> {
                     rootItem.getChildren().clear();
                     rootItem.setValue(new PathItem(rootPath, rootPath));
-                    
-                    for (Map<String, Object> folder : folders) {
-                        if ((Boolean) folder.get("is_directory")) {
-                            String folderPath = (String) folder.get("path");
-                            String folderName = (String) folder.get("name");
-                            Integer fileCount = ((Number) folder.get("file_count")).intValue();
-                            
-                            // Handle permission error folders
-                            String displayName = folderName;
-                            if (folderName.contains("(sin acceso)")) {
-                                displayName = folderName.replace("(sin acceso)", "(sin acceso)");
-                            }
-                            
-                            PathItem pathItem = new PathItem(
-                                displayName + (fileCount != null ? " (" + fileCount + " archivos)" : ""),
-                                folderPath
-                            );
-                            
-                            TreeItem<PathItem> folderItem = new TreeItem<>(pathItem);
-                            folderItem.setExpanded(false);
-                            
-                            // Only add placeholder if folder doesn't have permission error
-                            if (!folderName.contains("(sin acceso)")) {
-                                // Placeholder para subcarpetas
-                                folderItem.getChildren().add(new TreeItem<>(new PathItem("Loading...", "")));
-                                
-                                // Listener para expandir subcarpetas
-                                folderItem.expandedProperty().addListener((obs, wasExpanded, isNowExpanded) -> {
-                                    if (isNowExpanded && folderItem.getChildren().size() == 1 && 
-                                        folderItem.getChildren().get(0).getValue().toString().equals("Loading...")) {
-                                        loadSubFolders(folderItem, folderPath);
-                                    }
-                                });
-                            }
-                            
-                            rootItem.getChildren().add(folderItem);
+
+                    for (Map<String, Object> f : folders) {
+                        if (!Boolean.TRUE.equals(f.get("is_directory"))) continue;
+
+                        String fp   = (String) f.get("path");
+                        String fn   = (String) f.get("name");
+                        Object fc   = f.get("file_count");
+                        String disp = fn + (fc != null ? " (" + fc + " archivos)" : "");
+
+                        TreeItem<PathItem> item = new TreeItem<>(new PathItem(disp, fp));
+
+                        if (!fn.contains("(sin acceso)")) {
+                            item.getChildren().add(
+                                new TreeItem<>(new PathItem("Loading...", "")));
+                            item.expandedProperty().addListener((obs, was, now) -> {
+                                if (now
+                                    && item.getChildren().size() == 1
+                                    && "Loading...".equals(
+                                           item.getChildren().get(0).getValue().toString())) {
+                                    loadSubFolders(item, fp);
+                                }
+                            });
                         }
+                        rootItem.getChildren().add(item);
                     }
                 });
-                
             } catch (Exception e) {
-                Platform.runLater(() -> {
-                    rootItem.getChildren().clear();
-                    // Check if it's a permission error
-                    String errorMessage = e.getMessage();
-                    if (errorMessage != null && errorMessage.contains("403")) {
-                        rootItem.setValue(new PathItem(rootPath + " (sin acceso)", rootPath));
-                    } else {
-                        rootItem.setValue(new PathItem("Error: " + e.getMessage(), ""));
-                    }
-                });
+                Platform.runLater(() ->
+                    rootItem.setValue(new PathItem("Error: " + e.getMessage(), "")));
             }
         });
     }
@@ -362,36 +248,28 @@ public class ScannerController implements Initializable {
     private void loadSubFolders(TreeItem<PathItem> parentItem, String parentPath) {
         CompletableFuture.runAsync(() -> {
             try {
-                List<Map<String, Object>> subFolders = apiClient.exploreFolders(parentPath, false, 1);
-                
+                List<Map<String, Object>> subFolders =
+                    apiClient.exploreFolders(parentPath, false, 1);
                 Platform.runLater(() -> {
                     parentItem.getChildren().clear();
-                    
-                    for (Map<String, Object> folder : subFolders) {
-                        if ((Boolean) folder.get("is_directory")) {
-                            String folderPath = (String) folder.get("path");
-                            String folderName = (String) folder.get("name");
-                            Integer fileCount = ((Number) folder.get("file_count")).intValue();
-                            
-                            PathItem pathItem = new PathItem(
-                                folderName + (fileCount != null ? " (" + fileCount + " archivos)" : ""),
-                                folderPath
-                            );
-                            
-                            TreeItem<PathItem> folderItem = new TreeItem<>(pathItem);
-                            
-                            // FIX: Always add placeholder for lazy loading, remove blocking hasSubFolders call
-                            folderItem.getChildren().add(new TreeItem<>(new PathItem("Loading...", "")));
-                            
-                            parentItem.getChildren().add(folderItem);
-                        }
+                    for (Map<String, Object> f : subFolders) {
+                        if (!Boolean.TRUE.equals(f.get("is_directory"))) continue;
+                        String fp = (String) f.get("path");
+                        String fn = (String) f.get("name");
+                        Object fc = f.get("file_count");
+                        TreeItem<PathItem> item = new TreeItem<>(
+                            new PathItem(
+                                fn + (fc != null ? " (" + fc + " archivos)" : ""), fp));
+                        item.getChildren().add(
+                            new TreeItem<>(new PathItem("Loading...", "")));
+                        parentItem.getChildren().add(item);
                     }
                 });
-                
             } catch (Exception e) {
                 Platform.runLater(() -> {
                     parentItem.getChildren().clear();
-                    parentItem.getChildren().add(new TreeItem<>(new PathItem("Error: " + e.getMessage(), "")));
+                    parentItem.getChildren().add(
+                        new TreeItem<>(new PathItem("Error: " + e.getMessage(), "")));
                 });
             }
         });
@@ -399,80 +277,64 @@ public class ScannerController implements Initializable {
 
     private void validateSelectedPath(String path) {
         try {
-            var validation = apiClient.validateScanPath(path);
-            
-            if ((Boolean) validation.get("valid")) {
-                lblStatus.setText("Ruta válida para escaneo");
-                lblStatus.setStyle("-fx-text-fill: #10B981;");
-                
-                Integer estimatedFiles = ((Number) validation.get("estimated_files")).intValue();
-                if (estimatedFiles != null) {
-                    lblStatus.setText(lblStatus.getText() + " (~" + FormatUtils.formatNumber(estimatedFiles) + " archivos)");
-                }
-            } else {
-                lblStatus.setText((String) validation.get("reason"));
-                lblStatus.setStyle("-fx-text-fill: #EF4444;");
-                
-                if (validation.containsKey("suggestion")) {
-                    showAlert("Advertencia", (String) validation.get("suggestion"));
-                }
+            Map<String, Object> v = apiClient.validateScanPath(path);
+            boolean valid = Boolean.TRUE.equals(v.get("valid"));
+            String msg = valid
+                ? "Ruta válida"
+                : (String) v.getOrDefault("reason", "Ruta inválida");
+            if (valid && v.get("estimated_files") != null) {
+                msg += " (~" + FormatUtils.formatNumber(
+                    ((Number) v.get("estimated_files")).intValue()) + " archivos)";
             }
+            lblStatus.setText(msg);
+            lblStatus.setStyle(valid
+                ? "-fx-text-fill: #10B981;"
+                : "-fx-text-fill: #EF4444;");
         } catch (Exception e) {
             lblStatus.setText("Error validando ruta: " + e.getMessage());
             lblStatus.setStyle("-fx-text-fill: #EF4444;");
         }
     }
 
+    // ── Scan ──────────────────────────────────────────────────────────────────
+
     @FXML
     private void startScan() {
         String path = txtFolderPath.getText().trim();
         if (path.isEmpty()) {
-            showAlert("Error", "Por favor selecciona una carpeta válida.");
+            UIUtils.showErrorDialog("Error", "Selecciona una carpeta.");
             return;
         }
 
-        // Disable UI immediately to prevent multiple clicks
         btnStartScan.setDisable(true);
         btnStopScan.setDisable(false);
-        progressSection.setVisible(true);
-        progressSection.setManaged(true);
-        resultsSection.setVisible(false);
-        resultsSection.setManaged(false);
+        progressSection.setVisible(true);  progressSection.setManaged(true);
+        resultsSection.setVisible(false);  resultsSection.setManaged(false);
         lblStatus.setText("Iniciando escaneo...");
+        isScanning    = true;
+        scanCompleted = false;
 
-        // Run scan initiation in background thread
         ConcurrencyUtils.runAsync(() -> {
             try {
-                // Reset completion flag
-                scanCompleted = false;
-                
-                // Iniciar escaneo
                 currentScanId = apiClient.startScan(
-                    path, 
-                    spinnerMaxDepth.getValue(), 
-                    chkIncludeHidden.isSelected()
-                );
+                    path, spinnerMaxDepth.getValue(), chkIncludeHidden.isSelected());
 
-                // Update UI on main thread
                 Platform.runLater(() -> {
                     lblStatus.setText("Escaneando...");
-                    
-                    // Iniciar monitoreo de progreso
-                    startProgressMonitoring();
-
-                    // Refrescar lista de escaneos
+                    apiClient.connectScanWebSocket(
+                        currentScanId,
+                        this::handleWsMessage,
+                        this::onScanComplete,
+                        this::onScanError);
+                    wsConnected = true;
                     refreshScans();
                 });
-
             } catch (Exception e) {
                 Platform.runLater(() -> {
-                    // Reset UI on error
-                    btnStartScan.setDisable(false);
-                    btnStopScan.setDisable(true);
-                    progressSection.setVisible(false);
-                    progressSection.setManaged(false);
+                    resetScanUI();
                     lblStatus.setText("Error");
-                    showAlert("Error", "No se pudo iniciar el escaneo: " + e.getMessage());
+                    UIUtils.showErrorDialog("Error",
+                        "No se pudo iniciar el escaneo: " + e.getMessage());
                 });
             }
         });
@@ -480,50 +342,116 @@ public class ScannerController implements Initializable {
 
     @FXML
     private void stopScan() {
-        if (progressTimer != null) {
-            progressTimer.cancel();
-            progressTimer = null;
-        }
-        
-        // Cerrar WebSocket si está conectado
-        if (isWebSocketConnected) {
-            apiClient.closeScanWebSocket();  // FIX: Use instance method instead of static
-            isWebSocketConnected = false;
-            
-            // FIX: Only cancel progress locally, don't delete scan from backend
-            // The scan remains in history for user to view or delete manually
+        isScanning = false;
+        if (wsConnected) { apiClient.closeScanWebSocket(); wsConnected = false; }
+
+        if (currentScanId != null) {
+            ConcurrencyUtils.runAsync(() -> {
+                try { apiClient.deleteScan(currentScanId); }
+                catch (Exception e) {
+                    System.err.println("Error cancelling scan: " + e.getMessage());
+                }
+            });
         }
 
-        // Resetear UI
+        resetScanUI();
+        lblStatus.setText("Detenido");
+        refreshScans();
+    }
+
+    private void resetScanUI() {
         btnStartScan.setDisable(false);
         btnStopScan.setDisable(true);
         progressSection.setVisible(false);
         progressSection.setManaged(false);
-        lblStatus.setText("Detenido");
+    }
 
-        refreshScans();
+    // ── WebSocket handlers ────────────────────────────────────────────────────
+
+    private void handleWsMessage(JsonObject data) {
+        if (!data.has("type")) return;
+        switch (data.get("type").getAsString()) {
+            case "progress"  -> updateProgressUIFromWs(data);
+            case "completed" -> onScanComplete();
+            case "error"     -> onScanError(
+                data.has("message") ? data.get("message").getAsString() : "Error desconocido");
+        }
+    }
+
+    private void updateProgressUIFromWs(JsonObject data) {
+        double progress = data.has("progress")    ? data.get("progress").getAsDouble()  : 0;
+        int    found    = data.has("files_found")  ? data.get("files_found").getAsInt()  : 0;
+        String message  = data.has("message")     ? data.get("message").getAsString()   : "";
+
+        progressBar.setProgress(progress / 100.0);
+        lblProgress.setText(String.format("%.1f%%", progress));
+        lblFilesFound.setText(String.format("%,d archivos encontrados", found));
+        lblCurrentDir.setText(message);
+        lblStatus.setText("Escaneando en progreso...");
+    }
+
+    private void onScanComplete() {
+        if (scanCompleted) return;
+        scanCompleted = true;
+        isScanning    = false;
+        if (wsConnected) { apiClient.closeScanWebSocket(); wsConnected = false; }
+        resetScanUI();
+        lblStatus.setText("✅ Completado");
+
+        ConcurrencyUtils.runAsync(() -> {
+            try {
+                var result = apiClient.getScanResult(currentScanId);
+                Platform.runLater(() -> {
+                    lblTotalFiles.setText(String.format("%,d", result.getTotalFiles()));
+                    lblTotalSize.setText(FormatUtils.formatFileSize(result.getTotalSize()));
+                    lblScanTime.setText(String.format("%.1fs", result.getDurationSec()));
+                    lblScanId.setText(currentScanId);
+                    resultsSection.setVisible(true);
+                    resultsSection.setManaged(true);
+                    refreshScans();
+                });
+            } catch (Exception e) {
+                Platform.runLater(() ->
+                    UIUtils.showErrorDialog("Error",
+                        "Error obteniendo resultados: " + e.getMessage()));
+            }
+        });
+    }
+
+    private void onScanError(String error) {
+        isScanning = false;
+        if (wsConnected) { apiClient.closeScanWebSocket(); wsConnected = false; }
+        resetScanUI();
+        lblStatus.setText("Error: " + error);
+        UIUtils.showErrorDialog("Error de Escaneo", error);
+    }
+
+    // ── Other actions ─────────────────────────────────────────────────────────
+
+    @FXML
+    private void viewFiles() {
+        if (currentScanId != null) UIUtils.showFilesView(currentScanId, "completed");
+    }
+
+    @FXML
+    private void exportResults() {
+        UIUtils.showInfoDialog("Info", "Función de exportación próximamente...");
     }
 
     @FXML
     private void refreshScans() {
-        // Run in background to prevent UI freezing
         ConcurrencyUtils.runAsync(() -> {
             try {
                 var scans = apiClient.listScans();
-                
                 Platform.runLater(() -> {
                     scanList.clear();
-                    
-                    for (var scan : scans) {
+                    for (var s : scans)
                         scanList.add(new ScanInfo(
-                            scan.get("scan_id").toString(),
-                            scan.get("status").toString(),
-                            Integer.parseInt(scan.get("files_found").toString()),
+                            s.get("scan_id").toString(),
+                            s.get("status").toString(),
+                            Integer.parseInt(s.get("files_found").toString()),
                             FormatUtils.formatDate(java.time.LocalDateTime.now()),
-                            scanList,
-                            apiClient
-                        ));
-                    }
+                            scanList, apiClient));
                 });
             } catch (Exception e) {
                 System.err.println("Error refrescando escaneos: " + e.getMessage());
@@ -531,159 +459,38 @@ public class ScannerController implements Initializable {
         });
     }
 
-    @FXML
-    private void viewFiles() {
-        if (currentScanId != null) {
-            UIUtils.showFilesView(currentScanId, "completed");
-        }
-    }
-
-    @FXML
-    private void exportResults() {
-        if (currentScanId != null) {
-            // TODO: Implementar exportación
-            showAlert("Info", "Función de exportación próximamente...");
-        }
-    }
-
-    private void startProgressMonitoring() {
-        // Usar WebSocket para monitoreo en tiempo real
-        apiClient.connectScanWebSocket(currentScanId, this::handleWsMessage,  // FIX: Use instance method
-            this::onScanComplete, this::onScanError);
-        isWebSocketConnected = true;
-    }
-    
-    private void handleWsMessage(JsonObject data) {
-        String type = data.get("type").getAsString();
-        
-        switch (type) {
-            case "progress":
-                updateProgressUIFromWs(data);
-                break;
-            case "completed":
-                onScanComplete();
-                break;
-            case "error":
-                onScanError(data.get("message").getAsString());
-                break;
-        }
-    }
-    
-    private void updateProgressUIFromWs(JsonObject data) {
-        double progress = data.get("progress").getAsDouble();
-        int filesFound = data.get("files_found").getAsInt();
-        String message = data.get("message").getAsString();
-        String currentDir = data.has("current_dir") ? data.get("current_dir").getAsString() : "";
-        
-        Platform.runLater(() -> {
-            progressBar.setProgress(progress / 100.0);
-            lblProgress.setText(String.format("%.1f%%", progress));
-            lblFilesFound.setText(String.format("%,d archivos encontrados", filesFound));
-            lblCurrentDir.setText(message);
-            lblStatus.setText("Escaneando en progreso...");
-        });
-    }
-    
-    private void onScanComplete() {
-        if (scanCompleted) {
-            return; // Already processed completion
-        }
-        scanCompleted = true;
-        
-        Platform.runLater(() -> {
-            // Close WebSocket
-            apiClient.closeScanWebSocket();  // FIX: Use instance method instead of static
-            isWebSocketConnected = false;
-            
-            // Reset UI buttons manually
-            btnStartScan.setDisable(false);
-            btnStopScan.setDisable(true);
-            
-            // Hide progress section
-            progressSection.setVisible(false);
-            progressSection.setManaged(false);
-            
-            // Show results
-            showResultsFromWs();
-            
-            // Set status
-            lblStatus.setText("✅ Completado");
-        });
-    }
-    
-    private void onScanError(String errorMessage) {
-        Platform.runLater(() -> {
-            stopScan();
-            lblStatus.setText("Error: " + errorMessage);
-            showAlert("Error de Escaneo", errorMessage);
-        });
-    }
-    
-    private void showResultsFromWs() {
-        // Run in background to prevent UI freezing
-        ConcurrencyUtils.runAsync(() -> {
-            try {
-                var result = apiClient.getScanResult(currentScanId);
-                
-                Platform.runLater(() -> {
-                    lblTotalFiles.setText(String.format("%,d", result.getTotalFiles()));
-                    lblTotalSize.setText(FormatUtils.formatFileSize(result.getTotalSize()));
-                    lblScanTime.setText(String.format("%.1fs", result.getDurationSec()));
-                    lblScanId.setText(currentScanId);
-                    
-                    resultsSection.setVisible(true);
-                    resultsSection.setManaged(true);
-                });
-                
-            } catch (Exception e) {
-                Platform.runLater(() -> {
-                    showAlert("Error", "Error obteniendo resultados: " + e.getMessage());
-                });
-            }
-        });
-    }
-
-    private void updateProgressUI(ScanProgress progress) {
-        progressBar.setProgress(progress.getProgress() / 100.0);
-        lblProgress.setText(String.format("%.1f%%", progress.getProgress()));
-        lblFilesFound.setText(String.format("%,d archivos encontrados", progress.getFilesFound()));
-        lblCurrentDir.setText(progress.getMessage());
-    }
-
-    private void showResults(ScanProgress progress) {
-        // Run in background to prevent UI freezing
-        ConcurrencyUtils.runAsync(() -> {
-            try {
-                var result = apiClient.getScanResult(currentScanId);
-                
-                Platform.runLater(() -> {
-                    lblTotalFiles.setText(String.format("%,d", result.getTotalFiles()));
-                    lblTotalSize.setText(FormatUtils.formatFileSize(result.getTotalSize()));
-                    lblScanTime.setText(String.format("%.1fs", result.getDurationSec()));
-                    lblScanId.setText(currentScanId);
-                    
-                    resultsSection.setVisible(true);
-                    resultsSection.setManaged(true);
-                    lblStatus.setText("Completado");
-                });
-                
-            } catch (Exception e) {
-                Platform.runLater(() -> {
-                    showAlert("Error", "Error obteniendo resultados: " + e.getMessage());
-                });
-            }
-        });
-    }
+    // ── Helpers ───────────────────────────────────────────────────────────────
 
     private Stage getStage() {
         return (Stage) txtFolderPath.getScene().getWindow();
     }
 
-    private void showAlert(String title, String message) {
-        Alert alert = new Alert(Alert.AlertType.INFORMATION);
-        alert.setTitle(title);
-        alert.setHeaderText(null);
-        alert.setContentText(message);
-        alert.showAndWait();
+    // =========================================================================
+    // Inner class: PathItem
+    // =========================================================================
+    /**
+     * FIX: en el archivo original PathItem era una clase de nivel superior
+     * definida al final del mismo fichero (fuera de ScannerController).
+     * Java permite esto en un archivo .java no-public, pero al reescribir
+     * el controlador como clase única se omitió.
+     *
+     * Ahora vive como static inner class dentro de ScannerController,
+     * que es el patrón correcto: solo ScannerController la usa, y así
+     * el compilador la encuentra sin ningún import adicional.
+     */
+    static class PathItem {
+        private final String displayName;
+        private final String fullPath;
+
+        PathItem(String displayName, String fullPath) {
+            this.displayName = displayName;
+            this.fullPath    = fullPath;
+        }
+
+        public String getDisplayName() { return displayName; }
+        public String getFullPath()    { return fullPath; }
+
+        @Override
+        public String toString() { return displayName; }
     }
 }

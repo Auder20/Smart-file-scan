@@ -1,5 +1,7 @@
 package com.smartfileorganizer.models;
 
+import javafx.application.Platform;
+import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.layout.HBox;
 import javafx.collections.ObservableList;
@@ -8,82 +10,86 @@ import com.smartfileorganizer.api.ApiClient;
 public class ScanInfo {
     private String scanId;
     private String status;
-    private int filesFound;
+    private int    filesFound;
     private String date;
-    private HBox actions;  // FIX: Change from String to HBox for multiple buttons
-    private ObservableList<ScanInfo> scanList;  // Reference to parent list for delete functionality
-    private ApiClient apiClient;  // Reference to API client
+    private HBox   actions;
+    private ObservableList<ScanInfo> scanList;
+    private ApiClient apiClient;
 
-    public ScanInfo(String scanId, String status, int filesFound, String date, 
-                  ObservableList<ScanInfo> scanList, ApiClient apiClient) {
-        this.scanId = scanId;
-        this.status = status;
+    public ScanInfo(String scanId, String status, int filesFound, String date,
+                    ObservableList<ScanInfo> scanList, ApiClient apiClient) {
+        this.scanId     = scanId;
+        this.status     = status;
         this.filesFound = filesFound;
-        this.date = date;
-        this.scanList = scanList;
-        this.apiClient = apiClient;
-        this.actions = createActionButtons(scanId, status);
+        this.date       = date;
+        this.scanList   = scanList;
+        this.apiClient  = apiClient;
+        this.actions    = createActionButtons(scanId, status);
     }
 
     private HBox createActionButtons(String scanId, String status) {
-        HBox buttonBox = new HBox(5);
-        
-        Button viewButton = new Button("Ver");
-        viewButton.setStyle("-fx-font-size: 11px; -fx-padding: 2 8px;");
-        viewButton.setOnAction(e -> {
-            // FEAT 1: Implement view files functionality
+        HBox box = new HBox(5);
+
+        Button viewBtn = new Button("Ver");
+        viewBtn.setStyle("-fx-font-size: 11px; -fx-padding: 2 8px;");
+        viewBtn.setOnAction(e -> {
             try {
                 com.smartfileorganizer.utils.UIUtils.showFilesView(scanId, status);
             } catch (Exception ex) {
                 System.err.println("Error opening files view: " + ex.getMessage());
             }
         });
-        
-        buttonBox.getChildren().add(viewButton);
-        
-        // Only add delete button for completed scans
+        box.getChildren().add(viewBtn);
+
         if ("completed".equals(status)) {
-            Button deleteButton = new Button("Eliminar");
-            deleteButton.setStyle("-fx-font-size: 11px; -fx-padding: 2 8px; -fx-background-color: #ef4444; -fx-text-fill: white;");
-            deleteButton.setOnAction(e -> {
-                try {
-                    // Call API to delete scan
-                    apiClient.deleteScanAsync(scanId);
-                    
-                    // Remove from the list (which will update the table)
-                    scanList.removeIf(scan -> scan.getScanId().equals(scanId));
-                    
-                } catch (Exception ex) {
-                    System.err.println("Error deleting scan: " + ex.getMessage());
-                }
+            Button deleteBtn = new Button("Eliminar");
+            deleteBtn.setStyle(
+                "-fx-font-size: 11px; -fx-padding: 2 8px;" +
+                "-fx-background-color: #ef4444; -fx-text-fill: white;"
+            );
+            deleteBtn.setOnAction(e -> {
+                // FIX: el original llamaba deleteScanAsync sin .get() ni manejo de error
+                // (fire-and-forget). Ahora deshabilita el botón, ejecuta en background
+                // y muestra un alert si falla.
+                deleteBtn.setDisable(true);
+                deleteBtn.setText("...");
+
+                apiClient.deleteScanAsync(scanId)
+                    .thenRun(() -> Platform.runLater(() -> {
+                        scanList.removeIf(s -> s.getScanId().equals(scanId));
+                    }))
+                    .exceptionally(ex -> {
+                        Platform.runLater(() -> {
+                            deleteBtn.setDisable(false);
+                            deleteBtn.setText("Eliminar");
+                            Alert alert = new Alert(Alert.AlertType.ERROR);
+                            alert.setTitle("Error al eliminar");
+                            alert.setHeaderText(null);
+                            alert.setContentText("No se pudo eliminar el scan: " + ex.getMessage());
+                            alert.showAndWait();
+                        });
+                        return null;
+                    });
             });
-            buttonBox.getChildren().add(deleteButton);
+            box.getChildren().add(deleteBtn);
         }
-        
-        return buttonBox;
+
+        return box;
     }
 
     // Getters
-    public String getScanId() { return scanId; }
-    public String getStatus() { return status; }
-    public int getFilesFound() { return filesFound; }
-    public String getDate() { return date; }
-    public HBox getActions() { return actions; }
+    public String getScanId()    { return scanId; }
+    public String getStatus()    { return status; }
+    public int    getFilesFound(){ return filesFound; }
+    public String getDate()      { return date; }
+    public HBox   getActions()   { return actions; }
 
     // Setters
-    public void setScanId(String scanId) { 
-        this.scanId = scanId;
-        this.actions = createActionButtons(scanId, status);
-    }
-    public void setStatus(String status) { 
-        this.status = status;
-        this.actions = createActionButtons(scanId, status);
-    }
-    public void setFilesFound(int filesFound) { this.filesFound = filesFound; }
-    public void setDate(String date) { this.date = date; }
-    public void setActions(HBox actions) { this.actions = actions; }
-    
-    // Additional setters for the new fields
-    public void setScanList(ObservableList<ScanInfo> scanList) { this.scanList = scanList; }
-    public void setApiClient(ApiClient apiClient) { this.apiClient = apiClient; }
+    public void setScanId(String v)    { this.scanId = v;     this.actions = createActionButtons(v, status); }
+    public void setStatus(String v)    { this.status = v;     this.actions = createActionButtons(scanId, v); }
+    public void setFilesFound(int v)   { this.filesFound = v; }
+    public void setDate(String v)      { this.date = v; }
+    public void setActions(HBox v)     { this.actions = v; }
+    public void setScanList(ObservableList<ScanInfo> v) { this.scanList = v; }
+    public void setApiClient(ApiClient v)               { this.apiClient = v; }
 }

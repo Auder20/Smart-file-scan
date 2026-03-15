@@ -1,4 +1,17 @@
 services:
+
+  redis:
+    image: redis:7-alpine
+    container_name: sfo_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
   backend:
     container_name: python_dev
     build: ./backend
@@ -7,18 +20,22 @@ services:
       - "8000:8000"
     volumes:
       - ./backend:/app
-      # IMPROVEMENT: Mount the entire host filesystem for Docker mode
-      # This allows the app to scan all drives on the host system
       - /:/host:ro
-      # Also mount as read-write for file operations (delete, move, etc.)
       - /:/host_rw
+    env_file:
+      - .env
     environment:
       - HOST_ROOT=/host
       - HOST_ROOT_RW=/host_rw
-      # Allow connections from frontend and localhost
       - ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000,http://localhost:8080,http://127.0.0.1:8080
+      # FIX: guardar SQLite en /tmp para evitar "readonly database" en Docker
+      # Desktop con Windows, donde el volumen montado tiene permisos restrictivos.
+      # /tmp siempre es escribible dentro del contenedor.
+      - DB_PATH=/tmp/smart_file_organizer.db
+    depends_on:
+      redis:
+        condition: service_healthy
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-    # IMPROVEMENT: Add health check for better container management
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
       interval: 30s
@@ -35,7 +52,8 @@ services:
     volumes:
       - ./frontend:/app
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     command: tail -f /dev/null
 
-# FOR DEVELOPMENT ONLY - end users run build-*.sh or build-win.bat
+# FOR DEVELOPMENT ONLY

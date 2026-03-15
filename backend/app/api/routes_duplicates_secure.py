@@ -9,15 +9,15 @@ from pydantic import BaseModel, Field
 from app.models.file_info import DuplicateGroup
 from app.core.hasher import find_duplicates
 from app.core.scan_store import scan_store
-# FIX: imports explícitos desde database
-from app.db.database import get_files_paginated, get_scan, get_db_cursor
-# FIX: usar path_utils en vez de reimplementar la lógica de rutas
+from app.db.database import get_files_paginated, get_db_cursor
 from app.core.path_utils import resolve_path_for_docker
+# PRIORIDAD 5: importar validadores de seguridad centralizados
+from app.core.security import validate_delete_path
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/duplicates", tags=["duplicates"])
 
-# Límite de rutas por request para evitar abuso
+# PRIORIDAD 5: límite máximo de paths por petición de borrado
 MAX_DELETE_PATHS = 500
 
 
@@ -31,6 +31,7 @@ class DuplicatesResult(BaseModel):
 
 
 class DeleteRequest(BaseModel):
+    # PRIORIDAD 5: max_length limita el payload a MAX_DELETE_PATHS rutas
     paths:       list[str] = Field(..., min_length=1, max_length=MAX_DELETE_PATHS)
     use_recycle: bool      = True
 
@@ -41,6 +42,8 @@ class DeleteResult(BaseModel):
     deleted:       list[str]
     failed:        list[str]
 
+
+# ── Duplicates ────────────────────────────────────────────────────────────────
 
 @router.get("/{scan_id}")
 def get_duplicates(scan_id: str) -> DuplicatesResult:
@@ -62,24 +65,22 @@ def get_duplicates(scan_id: str) -> DuplicatesResult:
         files = all_files
 
     groups = find_duplicates(files)
-    total_wasted = sum(g.wasted_size for g in groups)
+    total_wasted     = sum(g.wasted_size for g in groups)
     total_duplicates = sum(len(g.duplicates) for g in groups)
 
     groups_dict = []
-    for group in groups:
+    for g in groups:
         gd: dict = {
-            "hash": group.hash,
-            "file_count": group.file_count,
-            "total_size": group.total_size,
-            "wasted_size": group.wasted_size,
+            "hash": g.hash, "file_count": g.file_count,
+            "total_size": g.total_size, "wasted_size": g.wasted_size,
             "duplicates": [],
         }
         gd["duplicates"].append({
-            "path": group.original.path, "name": group.original.name,
-            "size": group.original.size,
-            "modified": group.original.modified.isoformat(), "is_original": True,
+            "path": g.original.path, "name": g.original.name,
+            "size": g.original.size, "modified": g.original.modified.isoformat(),
+            "is_original": True,
         })
-        for dup in group.duplicates:
+        for dup in g.duplicates:
             gd["duplicates"].append({
                 "path": dup.path, "name": dup.name, "size": dup.size,
                 "modified": dup.modified.isoformat(), "is_original": False,
@@ -93,82 +94,80 @@ def get_duplicates(scan_id: str) -> DuplicatesResult:
     )
 
 
+# ── Helpers privados ──────────────────────────────────────────────────────────
+
 def _is_path_from_registered_scan(path: str) -> bool:
     """Verifica que la ruta pertenezca a algún scan registrado en SQLite."""
     try:
-        resolved = resolve_path_for_docker(path)
+        resolved  = resolve_path_for_docker(path)
         alt_paths = list({path, resolved})
 
-        # Traducción inversa Docker → nativo
         if resolved.startswith("/host/"):
             relative = resolved[len("/host/"):]
             if len(relative) >= 2 and relative[1] == "/":
                 drive = relative[0].upper()
-                rest = relative[2:].replace("/", "\\")
+                rest  = relative[2:].replace("/", "\\")
                 alt_paths.append(f"{drive}:\\{rest}")
 
         with get_db_cursor() as cursor:
-            placeholders = ",".join("?" for _ in alt_paths)
-            cursor.execute(
-                f"SELECT COUNT(*) FROM scan_files WHERE path IN ({placeholders})",
-                alt_paths,
-            )
+            ph = ",".join("?" for _ in alt_paths)
+            cursor.execute(f"SELECT COUNT(*) FROM scan_files WHERE path IN ({ph})", alt_paths)
             return cursor.fetchone()[0] > 0
     except Exception as e:
         logger.error(f"Error verificando ruta {path}: {e}")
         return False
 
 
-def _safe_normalize_path(path: str) -> str:
-    """
-    FIX: Previene path traversal validando que la ruta no contenga
-    secuencias sospechosas antes de intentar acceder al sistema de archivos.
-    """
-    # Normalizar separadores
-    normalized = os.path.normpath(path)
-    # Rechazar paths con traversal explícito
-    if ".." in normalized.split(os.sep):
-        raise ValueError(f"Ruta inválida (traversal detectado): {path}")
-    return normalized
-
+# ── Delete ────────────────────────────────────────────────────────────────────
 
 @router.delete("/files")
 def delete_files(request: DeleteRequest) -> DeleteResult:
+    """
+    PRIORIDAD 5 — Mejoras de seguridad aplicadas:
+      1. validate_delete_path() detecta path traversal (../, %2e%2e, etc.)
+         y rutas de sistema antes de cualquier operación de I/O.
+      2. MAX_DELETE_PATHS = 500 limita el tamaño del payload para prevenir
+         eliminaciones masivas accidentales o maliciosas.
+      3. _is_path_from_registered_scan() garantiza que solo se borren archivos
+         que el usuario escaneó explícitamente.
+    """
     deleted:     list[str] = []
     failed:      list[str] = []
     space_freed: int       = 0
 
-    for path in request.paths:
-        # FIX: validar traversal
+    for raw_path in request.paths:
+
+        # 1. Validación de seguridad (traversal + sistema)
         try:
-            safe_path = _safe_normalize_path(path)
+            safe_path = validate_delete_path(raw_path)
         except ValueError as e:
-            logger.warning(str(e))
-            failed.append(path)
+            logger.warning(f"Ruta rechazada por seguridad: {e}")
+            failed.append(raw_path)
             continue
 
-        resolved = resolve_path_for_docker(safe_path)
-
-        # Determinar ruta accesible
-        candidates = [resolved, safe_path]
+        # 2. Resolver para Docker
+        resolved   = resolve_path_for_docker(safe_path)
+        candidates = list({resolved, safe_path})
         if resolved.startswith("/host/"):
             relative = resolved[len("/host/"):]
             if len(relative) >= 2 and relative[1] == "/":
                 drive = relative[0].upper()
-                rest = relative[2:].replace("/", "\\")
+                rest  = relative[2:].replace("/", "\\")
                 candidates.append(f"{drive}:\\{rest}")
 
         actual_path = next((p for p in candidates if os.path.isfile(p)), None)
         if actual_path is None:
-            logger.warning(f"File not found: {path}")
-            failed.append(path)
+            logger.warning(f"Archivo no encontrado: {raw_path}")
+            failed.append(raw_path)
             continue
 
-        if not _is_path_from_registered_scan(path):
-            logger.warning(f"Ruta no registrada en ningún scan: {path}")
-            failed.append(path)
+        # 3. El archivo debe pertenecer a un scan registrado
+        if not _is_path_from_registered_scan(raw_path):
+            logger.warning(f"Ruta no registrada en ningún scan: {raw_path}")
+            failed.append(raw_path)
             continue
 
+        # 4. Borrado
         try:
             size = os.path.getsize(actual_path)
             if request.use_recycle:
@@ -176,11 +175,11 @@ def delete_files(request: DeleteRequest) -> DeleteResult:
                 send2trash.send2trash(actual_path)
             else:
                 os.remove(actual_path)
-            deleted.append(path)
+            deleted.append(raw_path)
             space_freed += size
         except Exception as e:
-            logger.error(f"No se pudo eliminar {path}: {e}")
-            failed.append(path)
+            logger.error(f"No se pudo eliminar {raw_path}: {e}")
+            failed.append(raw_path)
 
     return DeleteResult(
         deleted_count=len(deleted),

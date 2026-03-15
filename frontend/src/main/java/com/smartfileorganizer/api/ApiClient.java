@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
+import com.smartfileorganizer.utils.WebSocketManager;
 import okhttp3.*;
 
 import java.io.IOException;
@@ -17,37 +18,31 @@ import java.util.function.Consumer;
 import javafx.application.Platform;
 
 public class ApiClient {
-    private static final String BASE_URL = "http://localhost:8000";
-    private static final Gson gson = new Gson();
 
-    private static final OkHttpClient client = new OkHttpClient.Builder()
+    private static final String BASE_URL = "http://localhost:8000";
+    private static final Gson   gson     = new Gson();
+    private static final MediaType JSON  = MediaType.get("application/json");
+
+    private static final OkHttpClient httpClient = new OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(300, TimeUnit.SECONDS)
-        .writeTimeout(300, TimeUnit.SECONDS)  // Add write timeout for large uploads
+        .writeTimeout(300, TimeUnit.SECONDS)
         .build();
 
-    private static final MediaType JSON = MediaType.get("application/json");
-    
-    // WebSocket for real-time scan progress - FIX: Convert to instance fields
-    private WebSocket activeWebSocket;
-    private Consumer<JsonObject> wsMessageHandler;
-    private Runnable wsOnComplete;
-    private Consumer<String> wsOnError;
+    // FIX: WebSocketManager reemplaza el WebSocket raw anterior,
+    // añadiendo reconexión automática con backoff exponencial.
+    private WebSocketManager wsManager;
 
     public ApiClient() {}
 
-    // ── Health ───────────────────────────────────────────────────────────────
+    // ── Health ────────────────────────────────────────────────────────────────
 
     public static CompletableFuture<Boolean> isBackendReady() {
         return CompletableFuture.supplyAsync(() -> {
             try {
                 Request req = new Request.Builder().url(BASE_URL + "/api/health").build();
-                try (Response resp = client.newCall(req).execute()) {
-                    return resp.isSuccessful();
-                }
-            } catch (IOException e) {
-                return false;
-            }
+                try (Response r = httpClient.newCall(req).execute()) { return r.isSuccessful(); }
+            } catch (IOException e) { return false; }
         });
     }
 
@@ -60,25 +55,18 @@ public class ApiClient {
                 body.addProperty("path", path);
                 body.addProperty("max_depth", maxDepth);
                 body.addProperty("include_hidden", includeHidden);
-
                 Request req = new Request.Builder()
                     .url(BASE_URL + "/api/scan")
                     .post(RequestBody.create(body.toString(), JSON))
                     .build();
-
-                try (Response resp = client.newCall(req).execute()) {
-                    if (!resp.isSuccessful())
-                        throw new RuntimeException("Error al iniciar scan: " + resp.code());
-                    JsonObject json = gson.fromJson(resp.body().string(), JsonObject.class);
-                    return json.get("scan_id").getAsString();
+                try (Response r = httpClient.newCall(req).execute()) {
+                    if (!r.isSuccessful()) throw new RuntimeException("Error al iniciar scan: " + r.code());
+                    return gson.fromJson(r.body().string(), JsonObject.class).get("scan_id").getAsString();
                 }
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
+            } catch (IOException e) { throw new RuntimeException(e); }
         });
     }
 
-    // Keep sync version for compatibility
     public String startScan(String path, int maxDepth, boolean includeHidden) throws Exception {
         return startScanAsync(path, maxDepth, includeHidden).get();
     }
@@ -86,24 +74,16 @@ public class ApiClient {
     public CompletableFuture<com.smartfileorganizer.models.ScanProgress> getScanProgressAsync(String scanId) {
         return CompletableFuture.supplyAsync(() -> {
             try {
-                Request req = new Request.Builder()
-                    .url(BASE_URL + "/api/scan/" + scanId + "/progress")
-                    .build();
-                try (Response resp = client.newCall(req).execute()) {
-                    if (!resp.isSuccessful())
-                        throw new RuntimeException("Error obteniendo progreso: " + resp.code());
-                    JsonObject json = gson.fromJson(resp.body().string(), JsonObject.class);
+                Request req = new Request.Builder().url(BASE_URL + "/api/scan/" + scanId + "/progress").build();
+                try (Response r = httpClient.newCall(req).execute()) {
+                    if (!r.isSuccessful()) throw new RuntimeException("Error progreso: " + r.code());
+                    JsonObject j = gson.fromJson(r.body().string(), JsonObject.class);
                     return new com.smartfileorganizer.models.ScanProgress(
-                        json.get("scan_id").getAsString(),
-                        json.get("status").getAsString(),
-                        json.get("progress").getAsDouble(),
-                        json.get("files_found").getAsInt(),
-                        json.get("message").getAsString()
-                    );
+                        j.get("scan_id").getAsString(), j.get("status").getAsString(),
+                        j.get("progress").getAsDouble(), j.get("files_found").getAsInt(),
+                        j.get("message").getAsString());
                 }
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
+            } catch (IOException e) { throw new RuntimeException(e); }
         });
     }
 
@@ -114,25 +94,16 @@ public class ApiClient {
     public CompletableFuture<com.smartfileorganizer.models.ScanResult> getScanResultAsync(String scanId) {
         return CompletableFuture.supplyAsync(() -> {
             try {
-                Request req = new Request.Builder()
-                    .url(BASE_URL + "/api/scan/" + scanId)
-                    .build();
-                try (Response resp = client.newCall(req).execute()) {
-                    if (!resp.isSuccessful())
-                        throw new RuntimeException("Error obteniendo resultado: " + resp.code());
-                    JsonObject json = gson.fromJson(resp.body().string(), JsonObject.class);
+                Request req = new Request.Builder().url(BASE_URL + "/api/scan/" + scanId).build();
+                try (Response r = httpClient.newCall(req).execute()) {
+                    if (!r.isSuccessful()) throw new RuntimeException("Error resultado: " + r.code());
+                    JsonObject j = gson.fromJson(r.body().string(), JsonObject.class);
                     return new com.smartfileorganizer.models.ScanResult(
-                        json.get("scan_id").getAsString(),
-                        json.get("root_path").getAsString(),
-                        json.get("status").getAsString(),
-                        json.get("total_files").getAsInt(),
-                        json.get("total_size").getAsLong(),
-                        json.get("duration_sec").getAsDouble()
-                    );
+                        j.get("scan_id").getAsString(), j.get("root_path").getAsString(),
+                        j.get("status").getAsString(), j.get("total_files").getAsInt(),
+                        j.get("total_size").getAsLong(), j.get("duration_sec").getAsDouble());
                 }
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
+            } catch (IOException e) { throw new RuntimeException(e); }
         });
     }
 
@@ -140,7 +111,6 @@ public class ApiClient {
         return getScanResultAsync(scanId).get();
     }
 
-    // FEAT 3: Get files for a scan with pagination
     public CompletableFuture<Map<String, Object>> getScanFilesAsync(String scanId, int page, int pageSize) {
         return CompletableFuture.supplyAsync(() -> {
             try {
@@ -149,23 +119,11 @@ public class ApiClient {
                     .addQueryParameter("page", String.valueOf(page))
                     .addQueryParameter("page_size", String.valueOf(pageSize))
                     .build();
-
-                Request req = new Request.Builder()
-                    .url(url)
-                    .get()
-                    .build();
-
-                try (Response response = client.newCall(req).execute()) {
-                    if (!response.isSuccessful()) {
-                        throw new IOException("Unexpected code " + response);
-                    }
-                    
-                    String responseBody = response.body().string();
-                    return gson.fromJson(responseBody, Map.class);
+                try (Response r = httpClient.newCall(new Request.Builder().url(url).build()).execute()) {
+                    if (!r.isSuccessful()) throw new IOException("Unexpected code " + r);
+                    return gson.fromJson(r.body().string(), Map.class);
                 }
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
+            } catch (IOException e) { throw new RuntimeException(e); }
         });
     }
 
@@ -176,34 +134,28 @@ public class ApiClient {
     public CompletableFuture<List<Map<String, Object>>> listAllScansAsync() {
         return CompletableFuture.supplyAsync(() -> {
             try {
-                Request req = new Request.Builder()
-                    .url(BASE_URL + "/api/scan/all")
-                    .build();
-                try (Response resp = client.newCall(req).execute()) {
-                    if (!resp.isSuccessful())
-                        throw new RuntimeException("Error listando escaneos: " + resp.code());
-
-                    JsonArray arr = gson.fromJson(resp.body().string(), JsonArray.class);
+                Request req = new Request.Builder().url(BASE_URL + "/api/scan/all").build();
+                try (Response r = httpClient.newCall(req).execute()) {
+                    if (!r.isSuccessful()) throw new RuntimeException("Error listando scans: " + r.code());
+                    JsonArray arr = gson.fromJson(r.body().string(), JsonArray.class);
                     List<Map<String, Object>> scans = new ArrayList<>();
                     for (JsonElement el : arr) {
                         JsonObject o = el.getAsJsonObject();
                         Map<String, Object> m = new HashMap<>();
-                        m.put("scan_id",     safeString(o, "scan_id"));
-                        m.put("status",      safeString(o, "status"));
-                        m.put("files_found", safeInt(o, "files_found"));
-                        m.put("progress",    safeDouble(o, "progress"));
-                        m.put("root_path",   safeString(o, "root_path"));
-                        m.put("total_files", safeInt(o, "total_files"));
-                        m.put("total_size",  safeLong(o, "total_size"));
-                        m.put("scanned_at",  safeString(o, "scanned_at"));
-                        m.put("duration_sec",safeDouble(o, "duration_sec"));
+                        m.put("scan_id",      safeStr(o, "scan_id"));
+                        m.put("status",       safeStr(o, "status"));
+                        m.put("files_found",  safeInt(o, "files_found"));
+                        m.put("progress",     safeDouble(o, "progress"));
+                        m.put("root_path",    safeStr(o, "root_path"));
+                        m.put("total_files",  safeInt(o, "total_files"));
+                        m.put("total_size",   safeLong(o, "total_size"));
+                        m.put("scanned_at",   safeStr(o, "scanned_at"));
+                        m.put("duration_sec", safeDouble(o, "duration_sec"));
                         scans.add(m);
                     }
                     return scans;
                 }
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
+            } catch (IOException e) { throw new RuntimeException(e); }
         });
     }
 
@@ -214,17 +166,11 @@ public class ApiClient {
     public CompletableFuture<Void> deleteScanAsync(String scanId) {
         return CompletableFuture.runAsync(() -> {
             try {
-                Request req = new Request.Builder()
-                    .url(BASE_URL + "/api/scan/" + scanId)
-                    .delete()
-                    .build();
-                try (Response resp = client.newCall(req).execute()) {
-                    if (!resp.isSuccessful())
-                        throw new RuntimeException("Error eliminando scan: " + resp.code());
+                Request req = new Request.Builder().url(BASE_URL + "/api/scan/" + scanId).delete().build();
+                try (Response r = httpClient.newCall(req).execute()) {
+                    if (!r.isSuccessful()) throw new RuntimeException("Error eliminando scan: " + r.code());
                 }
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
+            } catch (IOException e) { throw new RuntimeException(e); }
         });
     }
 
@@ -237,26 +183,20 @@ public class ApiClient {
     public CompletableFuture<Map<String, Object>> getStatsAsync(String scanId) {
         return CompletableFuture.supplyAsync(() -> {
             try {
-                Request req = new Request.Builder()
-                    .url(BASE_URL + "/api/stats/" + scanId)
-                    .build();
-                try (Response resp = client.newCall(req).execute()) {
-                    if (!resp.isSuccessful())
-                        throw new RuntimeException("Error obteniendo estadísticas: " + resp.code());
-
-                    JsonObject json = gson.fromJson(resp.body().string(), JsonObject.class);
+                Request req = new Request.Builder().url(BASE_URL + "/api/stats/" + scanId).build();
+                try (Response r = httpClient.newCall(req).execute()) {
+                    if (!r.isSuccessful()) throw new RuntimeException("Error stats: " + r.code());
+                    JsonObject j = gson.fromJson(r.body().string(), JsonObject.class);
                     Map<String, Object> result = new HashMap<>();
-                    result.put("total_files",     safeInt(json, "total_files"));
-                    result.put("total_size",       safeLong(json, "total_size"));
-                    result.put("empty_files",      safeInt(json, "empty_files"));
-                    result.put("old_files_count",  safeInt(json, "old_files_count"));
-                    result.put("old_files_size",   safeLong(json, "old_files_size"));
-                    result.put("by_category",      json.get("by_category").getAsJsonArray());
+                    result.put("total_files",    safeInt(j, "total_files"));
+                    result.put("total_size",     safeLong(j, "total_size"));
+                    result.put("empty_files",    safeInt(j, "empty_files"));
+                    result.put("old_files_count",safeInt(j, "old_files_count"));
+                    result.put("old_files_size", safeLong(j, "old_files_size"));
+                    result.put("by_category",    j.get("by_category").getAsJsonArray());
                     return result;
                 }
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
+            } catch (IOException e) { throw new RuntimeException(e); }
         });
     }
 
@@ -270,29 +210,22 @@ public class ApiClient {
         return CompletableFuture.supplyAsync(() -> {
             try {
                 Request req = new Request.Builder()
-                    .url(BASE_URL + "/api/files/" + scanId + "/largest?limit=" + limit)
-                    .build();
-                try (Response resp = client.newCall(req).execute()) {
-                    if (!resp.isSuccessful())
-                        throw new RuntimeException("Error obteniendo archivos grandes: " + resp.code());
-
-                    JsonArray arr = gson.fromJson(resp.body().string(), JsonArray.class);
+                    .url(BASE_URL + "/api/files/" + scanId + "/largest?limit=" + limit).build();
+                try (Response r = httpClient.newCall(req).execute()) {
+                    if (!r.isSuccessful()) throw new RuntimeException("Error archivos grandes: " + r.code());
+                    JsonArray arr = gson.fromJson(r.body().string(), JsonArray.class);
                     List<Map<String, Object>> files = new ArrayList<>();
                     for (JsonElement el : arr) {
                         JsonObject o = el.getAsJsonObject();
                         Map<String, Object> m = new HashMap<>();
-                        m.put("name",     safeString(o, "name"));
-                        m.put("path",     safeString(o, "path"));
-                        m.put("size",     safeLong(o, "size"));
-                        m.put("modified", safeString(o, "modified"));
-                        m.put("category", safeString(o, "category"));
+                        m.put("name", safeStr(o, "name")); m.put("path", safeStr(o, "path"));
+                        m.put("size", safeLong(o, "size")); m.put("modified", safeStr(o, "modified"));
+                        m.put("category", safeStr(o, "category"));
                         files.add(m);
                     }
                     return files;
                 }
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
+            } catch (IOException e) { throw new RuntimeException(e); }
         });
     }
 
@@ -300,28 +233,21 @@ public class ApiClient {
         return CompletableFuture.supplyAsync(() -> {
             try {
                 Request req = new Request.Builder()
-                    .url(BASE_URL + "/api/files/" + scanId + "/extensions")
-                    .build();
-                try (Response resp = client.newCall(req).execute()) {
-                    if (!resp.isSuccessful())
-                        throw new RuntimeException("Error obteniendo extensiones: " + resp.code());
-
-                    JsonArray arr = gson.fromJson(resp.body().string(), JsonArray.class);
+                    .url(BASE_URL + "/api/files/" + scanId + "/extensions").build();
+                try (Response r = httpClient.newCall(req).execute()) {
+                    if (!r.isSuccessful()) throw new RuntimeException("Error extensiones: " + r.code());
+                    JsonArray arr = gson.fromJson(r.body().string(), JsonArray.class);
                     List<Map<String, Object>> exts = new ArrayList<>();
                     for (JsonElement el : arr) {
                         JsonObject o = el.getAsJsonObject();
                         Map<String, Object> m = new HashMap<>();
-                        m.put("extension",  safeString(o, "extension"));
-                        m.put("count",      safeInt(o, "count"));
-                        m.put("total_size", safeLong(o, "total_size"));
-                        m.put("percentage", safeDouble(o, "percentage"));
+                        m.put("extension", safeStr(o, "extension")); m.put("count", safeInt(o, "count"));
+                        m.put("total_size", safeLong(o, "total_size")); m.put("percentage", safeDouble(o, "percentage"));
                         exts.add(m);
                     }
                     return exts;
                 }
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
+            } catch (IOException e) { throw new RuntimeException(e); }
         });
     }
 
@@ -330,25 +256,19 @@ public class ApiClient {
     public CompletableFuture<Map<String, Object>> getDuplicatesAsync(String scanId) {
         return CompletableFuture.supplyAsync(() -> {
             try {
-                Request req = new Request.Builder()
-                    .url(BASE_URL + "/api/duplicates/" + scanId)
-                    .build();
-                try (Response resp = client.newCall(req).execute()) {
-                    if (!resp.isSuccessful())
-                        throw new RuntimeException("Error obteniendo duplicados: " + resp.code());
-
-                    JsonObject json = gson.fromJson(resp.body().string(), JsonObject.class);
+                Request req = new Request.Builder().url(BASE_URL + "/api/duplicates/" + scanId).build();
+                try (Response r = httpClient.newCall(req).execute()) {
+                    if (!r.isSuccessful()) throw new RuntimeException("Error duplicados: " + r.code());
+                    JsonObject j = gson.fromJson(r.body().string(), JsonObject.class);
                     Map<String, Object> result = new HashMap<>();
-                    result.put("total_groups",     safeInt(json, "total_groups"));
-                    result.put("total_duplicates", safeInt(json, "total_duplicates"));
-                    result.put("total_wasted",     safeLong(json, "total_wasted"));
-                    result.put("analyzed_files",   safeInt(json, "analyzed_files"));
-                    result.put("groups",           json.get("groups").getAsJsonArray());
+                    result.put("total_groups",     safeInt(j, "total_groups"));
+                    result.put("total_duplicates", safeInt(j, "total_duplicates"));
+                    result.put("total_wasted",     safeLong(j, "total_wasted"));
+                    result.put("analyzed_files",   safeInt(j, "analyzed_files"));
+                    result.put("groups",           j.get("groups").getAsJsonArray());
                     return result;
                 }
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
+            } catch (IOException e) { throw new RuntimeException(e); }
         });
     }
 
@@ -364,38 +284,23 @@ public class ApiClient {
                 paths.forEach(arr::add);
                 body.add("paths", arr);
                 body.addProperty("use_recycle", useRecycle);
-
                 Request req = new Request.Builder()
                     .url(BASE_URL + "/api/duplicates/files")
                     .delete(RequestBody.create(body.toString(), JSON))
                     .build();
-
-                try (Response resp = client.newCall(req).execute()) {
-                    if (!resp.isSuccessful())
-                        throw new RuntimeException("Error eliminando archivos: " + resp.code());
-
-                    JsonObject json = gson.fromJson(resp.body().string(), JsonObject.class);
+                try (Response r = httpClient.newCall(req).execute()) {
+                    if (!r.isSuccessful()) throw new RuntimeException("Error eliminando archivos: " + r.code());
+                    JsonObject j = gson.fromJson(r.body().string(), JsonObject.class);
                     Map<String, Object> result = new HashMap<>();
-                    result.put("deleted_count", safeInt(json, "deleted_count"));
-                    result.put("space_freed",   safeLong(json, "space_freed"));
-
-                    List<String> deleted = new ArrayList<>();
-                    List<String> failed  = new ArrayList<>();
-                    if (json.has("deleted")) {
-                        for (JsonElement el : json.get("deleted").getAsJsonArray())
-                            deleted.add(el.getAsString());
-                    }
-                    if (json.has("failed")) {
-                        for (JsonElement el : json.get("failed").getAsJsonArray())
-                            failed.add(el.getAsString());
-                    }
-                    result.put("deleted", deleted);
-                    result.put("failed",  failed);
+                    result.put("deleted_count", safeInt(j, "deleted_count"));
+                    result.put("space_freed",   safeLong(j, "space_freed"));
+                    List<String> deleted = new ArrayList<>(), failed = new ArrayList<>();
+                    if (j.has("deleted")) j.get("deleted").getAsJsonArray().forEach(e -> deleted.add(e.getAsString()));
+                    if (j.has("failed"))  j.get("failed").getAsJsonArray().forEach(e -> failed.add(e.getAsString()));
+                    result.put("deleted", deleted); result.put("failed", failed);
                     return result;
                 }
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
+            } catch (IOException e) { throw new RuntimeException(e); }
         });
     }
 
@@ -407,26 +312,19 @@ public class ApiClient {
 
     public List<Map<String, Object>> getAvailableDrives() throws Exception {
         Request req = new Request.Builder().url(BASE_URL + "/api/explorer/drives").build();
-        try (Response resp = client.newCall(req).execute()) {
-            if (!resp.isSuccessful())
-                throw new RuntimeException("Error obteniendo unidades: " + resp.code());
-            JsonArray arr = gson.fromJson(resp.body().string(), JsonArray.class);
+        try (Response r = httpClient.newCall(req).execute()) {
+            if (!r.isSuccessful()) throw new RuntimeException("Error drives: " + r.code());
+            JsonArray arr = gson.fromJson(r.body().string(), JsonArray.class);
             List<Map<String, Object>> drives = new ArrayList<>();
             for (JsonElement el : arr) {
                 JsonObject o = el.getAsJsonObject();
                 Map<String, Object> m = new HashMap<>();
-                m.put("name", safeString(o, "name"));
-                m.put("path", safeString(o, "path"));
-                if (o.has("total_space") && !o.get("total_space").isJsonNull())
-                    m.put("total_space", o.get("total_space").getAsLong());
-                if (o.has("free_space") && !o.get("free_space").isJsonNull())
-                    m.put("free_space", o.get("free_space").getAsLong());
-                if (o.has("used_space") && !o.get("used_space").isJsonNull())
-                    m.put("used_space", o.get("used_space").getAsLong());
-                if (o.has("filesystem") && !o.get("filesystem").isJsonNull())
-                    m.put("filesystem", safeString(o, "filesystem"));
-                if (o.has("is_removable"))
-                    m.put("is_removable", o.get("is_removable").getAsBoolean());
+                m.put("name", safeStr(o, "name")); m.put("path", safeStr(o, "path"));
+                if (o.has("total_space") && !o.get("total_space").isJsonNull()) m.put("total_space", o.get("total_space").getAsLong());
+                if (o.has("free_space")  && !o.get("free_space").isJsonNull())  m.put("free_space",  o.get("free_space").getAsLong());
+                if (o.has("used_space")  && !o.get("used_space").isJsonNull())  m.put("used_space",  o.get("used_space").getAsLong());
+                if (o.has("filesystem")  && !o.get("filesystem").isJsonNull())  m.put("filesystem",  safeStr(o, "filesystem"));
+                if (o.has("is_removable")) m.put("is_removable", o.get("is_removable").getAsBoolean());
                 drives.add(m);
             }
             return drives;
@@ -436,25 +334,18 @@ public class ApiClient {
     public List<Map<String, Object>> exploreFolders(String path, boolean includeHidden, int maxDepth) throws Exception {
         String url = BASE_URL + "/api/explorer/folders?path="
             + java.net.URLEncoder.encode(path, "UTF-8")
-            + "&include_hidden=" + includeHidden
-            + "&max_depth=" + maxDepth;
-
-        Request req = new Request.Builder().url(url).build();
-        try (Response resp = client.newCall(req).execute()) {
-            if (!resp.isSuccessful())
-                throw new RuntimeException("Error explorando carpetas: " + resp.code());
-            JsonArray arr = gson.fromJson(resp.body().string(), JsonArray.class);
+            + "&include_hidden=" + includeHidden + "&max_depth=" + maxDepth;
+        try (Response r = httpClient.newCall(new Request.Builder().url(url).build()).execute()) {
+            if (!r.isSuccessful()) throw new RuntimeException("Error folders: " + r.code());
+            JsonArray arr = gson.fromJson(r.body().string(), JsonArray.class);
             List<Map<String, Object>> folders = new ArrayList<>();
             for (JsonElement el : arr) {
                 JsonObject o = el.getAsJsonObject();
                 Map<String, Object> m = new HashMap<>();
-                m.put("name",         safeString(o, "name"));
-                m.put("path",         safeString(o, "path"));
+                m.put("name", safeStr(o, "name")); m.put("path", safeStr(o, "path"));
                 m.put("is_directory", o.has("is_directory") && o.get("is_directory").getAsBoolean());
-                if (o.has("size") && !o.get("size").isJsonNull())
-                    m.put("size", o.get("size").getAsLong());
-                if (o.has("file_count") && !o.get("file_count").isJsonNull())
-                    m.put("file_count", o.get("file_count").getAsInt());
+                if (o.has("size")       && !o.get("size").isJsonNull())       m.put("size",       o.get("size").getAsLong());
+                if (o.has("file_count") && !o.get("file_count").isJsonNull()) m.put("file_count", o.get("file_count").getAsInt());
                 folders.add(m);
             }
             return folders;
@@ -464,103 +355,47 @@ public class ApiClient {
     public Map<String, Object> validateScanPath(String path) throws Exception {
         String url = BASE_URL + "/api/explorer/validate-path?path="
             + java.net.URLEncoder.encode(path, "UTF-8");
-        Request req = new Request.Builder().url(url).build();
-        try (Response resp = client.newCall(req).execute()) {
-            if (!resp.isSuccessful())
-                throw new RuntimeException("Error validando ruta: " + resp.code());
-            JsonObject json = gson.fromJson(resp.body().string(), JsonObject.class);
+        try (Response r = httpClient.newCall(new Request.Builder().url(url).build()).execute()) {
+            if (!r.isSuccessful()) throw new RuntimeException("Error validate: " + r.code());
+            JsonObject j = gson.fromJson(r.body().string(), JsonObject.class);
             Map<String, Object> result = new HashMap<>();
-            result.put("valid", json.get("valid").getAsBoolean());
-            if (json.has("reason"))         result.put("reason",          safeString(json, "reason"));
-            if (json.has("suggestion"))     result.put("suggestion",      safeString(json, "suggestion"));
-            if (json.has("estimated_files")) result.put("estimated_files", safeInt(json, "estimated_files"));
-            if (json.has("message"))        result.put("message",         safeString(json, "message"));
+            result.put("valid", j.get("valid").getAsBoolean());
+            if (j.has("reason"))          result.put("reason",          safeStr(j, "reason"));
+            if (j.has("suggestion"))      result.put("suggestion",      safeStr(j, "suggestion"));
+            if (j.has("estimated_files")) result.put("estimated_files", safeInt(j, "estimated_files"));
+            if (j.has("message"))         result.put("message",         safeStr(j, "message"));
             return result;
         }
     }
 
-    // ── WebSocket Support ─────────────────────────────────────────────────────
+    // ── WebSocket con reconexión automática ───────────────────────────────────
 
-    public void connectScanWebSocket(String scanId, Consumer<JsonObject> onMessage, 
-                                     Runnable onComplete, Consumer<String> onError) {
-        // Close existing connection if any
+    /**
+     * FIX: reemplaza la conexión WebSocket raw por WebSocketManager,
+     * que añade reconexión automática con backoff exponencial.
+     */
+    public void connectScanWebSocket(
+        String scanId,
+        Consumer<JsonObject> onMessage,
+        Runnable onComplete,
+        Consumer<String> onError
+    ) {
         closeScanWebSocket();
-        
-        wsMessageHandler = onMessage;
-        wsOnComplete = onComplete;
-        wsOnError = onError;
-        
-        String wsUrl = "ws://localhost:8000/api/scan/ws/scan/" + scanId;
-        Request request = new Request.Builder().url(wsUrl).build();
-        
-        WebSocketListener listener = new WebSocketListener() {
-            @Override
-            public void onOpen(WebSocket webSocket, Response response) {
-                System.out.println("WebSocket connected for scan: " + scanId);
-            }
-            
-            @Override
-            public void onMessage(WebSocket webSocket, String text) {
-                try {
-                    JsonObject data = gson.fromJson(text, JsonObject.class);
-                    Platform.runLater(() -> {
-                        if (wsMessageHandler != null) {
-                            wsMessageHandler.accept(data);
-                        }
-                    });
-                } catch (Exception e) {
-                    System.err.println("Error parsing WebSocket message: " + e.getMessage());
-                }
-            }
-            
-            @Override
-            public void onClosing(WebSocket webSocket, int code, String reason) {
-                System.out.println("WebSocket closing for scan: " + scanId);
-            }
-            
-            @Override
-            public void onClosed(WebSocket webSocket, int code, String reason) {
-                System.out.println("WebSocket closed for scan: " + scanId);
-                // Completion is handled by the "completed" message in onMessage(), not the close event
-            }
-            
-            @Override
-            public void onFailure(WebSocket webSocket, Throwable t, Response response) {
-                String error = "WebSocket connection failed: " + (t != null ? t.getMessage() : "Unknown error");
-                System.err.println(error);
-                Platform.runLater(() -> {
-                    if (wsOnError != null) {
-                        wsOnError.accept(error);
-                    }
-                });
-            }
-        };
-        
-        activeWebSocket = client.newWebSocket(request, listener);
+        wsManager = new WebSocketManager(httpClient, scanId, onMessage, onComplete, onError);
+        wsManager.connect();
     }
-    
+
     public void closeScanWebSocket() {
-        if (activeWebSocket != null) {
-            activeWebSocket.close(1000, "Connection closed by client");
-            activeWebSocket = null;
+        if (wsManager != null) {
+            wsManager.close();
+            wsManager = null;
         }
-        wsMessageHandler = null;
-        wsOnComplete = null;
-        wsOnError = null;
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private static String safeString(JsonObject o, String key) {
-        return (o.has(key) && !o.get(key).isJsonNull()) ? o.get(key).getAsString() : "";
-    }
-    private static int safeInt(JsonObject o, String key) {
-        return (o.has(key) && !o.get(key).isJsonNull()) ? o.get(key).getAsInt() : 0;
-    }
-    private static long safeLong(JsonObject o, String key) {
-        return (o.has(key) && !o.get(key).isJsonNull()) ? o.get(key).getAsLong() : 0L;
-    }
-    private static double safeDouble(JsonObject o, String key) {
-        return (o.has(key) && !o.get(key).isJsonNull()) ? o.get(key).getAsDouble() : 0.0;
-    }
+    private static String safeStr(JsonObject o, String k)    { return (o.has(k) && !o.get(k).isJsonNull()) ? o.get(k).getAsString() : ""; }
+    private static int    safeInt(JsonObject o, String k)    { return (o.has(k) && !o.get(k).isJsonNull()) ? o.get(k).getAsInt()    : 0;  }
+    private static long   safeLong(JsonObject o, String k)   { return (o.has(k) && !o.get(k).isJsonNull()) ? o.get(k).getAsLong()   : 0L; }
+    private static double safeDouble(JsonObject o, String k) { return (o.has(k) && !o.get(k).isJsonNull()) ? o.get(k).getAsDouble() : 0.0;}
 }

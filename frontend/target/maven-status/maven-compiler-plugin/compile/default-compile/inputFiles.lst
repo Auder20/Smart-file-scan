@@ -14,6 +14,7 @@ D:\smart-file-organizer\frontend\src\main\java\com\smartfileorganizer\models\Sca
 D:\smart-file-organizer\frontend\src\main\java\com\smartfileorganizer\models\ScanProgress.java
 D:\smart-file-organizer\frontend\src\main\java\com\smartfileorganizer\models\LargeFile.java
 D:\smart-file-organizer\frontend\src\main\java\com\smartfileorganizer\models\RecentScan.java
+D:\smart-file-organizer\frontend\src\main\java\com\smartfileorganizer\utils\WebSocketManager.java
 D:\smart-file-organizer\frontend\src\main\java\com\smartfileorganizer\api\ApiClient.java
 D:\smart-file-organizer\frontend\src\main\java\com\smartfileorganizer\controllers\ScannerController.java
 D:\smart-file-organizer\frontend\src\main\java\com\smartfileorganizer\controllers\DuplicatesController.java
