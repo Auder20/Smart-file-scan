@@ -1,167 +1,309 @@
 #!/usr/bin/env bash
+# ============================================================
+#  Smart File Organizer — macOS Package Builder
+#  Genera: SmartFileOrganizer-1.0.0.dmg
+#
+#  Requisitos en la maquina que ejecuta este script:
+#    - Java 21 JDK  (con jpackage)
+#    - Python 3.11+
+#    - Maven 3.8+
+#    - Xcode Command Line Tools (para create-dmg / hdiutil)
+#    - create-dmg (opcional, para DMG bonito):
+#        brew install create-dmg
+#
+#  El .dmg resultante NO requiere nada instalado
+#  en la maquina del usuario final.
+#
+#  NOTA: Para distribuir en Mac App Store o sin el aviso
+#  de Gatekeeper necesitas una Apple Developer ID (~$99/año).
+#  Sin firma el usuario hace: clic derecho → Abrir → Abrir.
+# ============================================================
 set -euo pipefail
 
-echo "[INFO] Smart File Organizer Build Script for macOS"
-echo ==================================================
+APP_NAME="SmartFileOrganizer"
+APP_DISPLAY_NAME="Smart File Organizer"
+APP_VERSION="1.0.0"
+BUNDLE_ID="com.smartfileorganizer.app"
+MAIN_CLASS="com.smartfileorganizer.Main"
+DIST_DIR="dist/mac"
+BACKEND_DIST="$DIST_DIR/backend"
+FRONTEND_DIST="$DIST_DIR/frontend"
+INSTALLER_DIR="dist/installer"
 
-# Check for Homebrew
-echo "[INFO] Checking Homebrew installation..."
-if ! command -v brew >/dev/null 2>&1; then
-    echo "[INFO] Installing Homebrew..."
-    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-    
-    # Add Homebrew to PATH for current session
-    if [ -x /opt/homebrew/bin/brew ]; then
-        # Apple Silicon
-        eval "$(/opt/homebrew/bin/brew shellenv)"
-    else
-        # Intel
-        eval "$(/usr/local/bin/brew shellenv)"
-    fi
-else
-    echo "[OK] Homebrew found"
-fi
+# Opcional: firma de código (requiere Apple Developer ID)
+# Deja vacío para omitir firma (usuarios verán advertencia Gatekeeper)
+SIGN_IDENTITY=""
+# SIGN_IDENTITY="Developer ID Application: Tu Nombre (XXXXXXXXXX)"
 
-# Check and install Java 17+
-echo "[INFO] Checking Java installation..."
-if ! command -v java >/dev/null 2>&1; then
-    echo "[INFO] Installing OpenJDK 17..."
-    brew install openjdk@17
-    
-    # Set up JAVA_HOME
-    if [ -x /opt/homebrew/bin/brew ]; then
-        # Apple Silicon
-        export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
-        echo 'export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home' >> ~/.zshrc
-    else
-        # Intel
-        export JAVA_HOME=/usr/local/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
-        echo 'export JAVA_HOME=/usr/local/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home' >> ~/.zshrc
-    fi
-else
-    echo "[OK] Java found"
-fi
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+BLUE='\033[0;34m'; NC='\033[0m'
 
-# Verify Java version
-JAVA_VERSION=$(java -version 2>&1 | head -n1 | cut -d'"' -f2 | cut -d'.' -f1)
-if [ "$JAVA_VERSION" -lt 17 ]; then
-    echo "[ERROR] Java version $JAVA_VERSION is too old. Installing OpenJDK 17..."
-    brew install openjdk@17
-    
-    # Set up JAVA_HOME
-    if [ -x /opt/homebrew/bin/brew ]; then
-        export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
-    else
-        export JAVA_HOME=/usr/local/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
-    fi
-fi
+info()  { echo -e "${BLUE}[INFO]${NC} $1"; }
+ok()    { echo -e "${GREEN}[OK]${NC}   $1"; }
+warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
+error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
+step()  { echo -e "\n${BLUE}[STEP $1]${NC} $2"; }
 
-# Check and install Python 3.11+
-echo "[INFO] Checking Python installation..."
-if ! command -v python3 >/dev/null 2>&1; then
-    echo "[INFO] Installing Python 3.11..."
-    brew install python@3.11
-else
-    echo "[OK] Python3 found"
-fi
+echo ""
+echo "========================================================="
+echo "  Smart File Organizer — macOS Package Builder"
+echo "========================================================="
+echo ""
 
-# Verify Python version
-PYTHON_VERSION=$(python3 --version | cut -d' ' -f2)
-PYTHON_MAJOR=$(echo $PYTHON_VERSION | cut -d'.' -f1)
-PYTHON_MINOR=$(echo $PYTHON_VERSION | cut -d'.' -f2)
-
-if [ "$PYTHON_MAJOR" -lt 3 ] || [ "$PYTHON_MINOR" -lt 11 ]; then
-    echo "[INFO] Python version $PYTHON_MAJOR.$PYTHON_MINOR is too old. Installing Python 3.11..."
-    brew install python@3.11
-fi
-
-# Check and install Maven
-echo "[INFO] Checking Maven installation..."
-if ! command -v mvn >/dev/null 2>&1; then
-    echo "[INFO] Installing Maven..."
-    brew install maven
-else
-    echo "[OK] Maven found"
-fi
-
-echo "[OK] All dependencies found"
-
-# Detect architecture
+# ── Detectar arquitectura ──────────────────────────────────────────────────────
 ARCH=$(uname -m)
-echo "[INFO] Detected architecture: $ARCH"
-
-# Create backend virtual environment
-echo "[INFO] Creating Python virtual environment..."
-if [ ! -d "backend/.venv" ]; then
-    cd backend
-    python3 -m venv .venv
-    cd ..
-fi
-
-echo "[INFO] Activating virtual environment and installing dependencies..."
-source backend/.venv/bin/activate
-pip install -r backend/requirements.txt
-
-# Build frontend with architecture-specific flags
-echo "[INFO] Building frontend with Maven..."
-cd frontend
-if [ "$ARCH" = "arm64" ]; then
-    echo "[INFO] Using Apple Silicon (arm64) JavaFX configuration"
-    mvn clean package -DskipTests -Djavafx.platform=mac-aarch64
+if [[ "$ARCH" == "arm64" ]]; then
+    info "Arquitectura: Apple Silicon (arm64)"
+    JAVAFX_PLATFORM="mac-aarch64"
 else
-    echo "[INFO] Using Intel (x86_64) JavaFX configuration"
-    mvn clean package -DskipTests
-fi
-cd ..
-
-# Create .env file if not exists
-if [ ! -f ".env" ]; then
-    if [ -f ".env.example" ]; then
-        echo "[INFO] Creating .env from .env.example"
-        cp .env.example .env
-        
-        # Set HOST_SCAN_PATH to user's home directory
-        sed -i '' "s|HOST_SCAN_PATH=.*|HOST_SCAN_PATH=$HOME|g" .env
-    else
-        echo "[WARN] .env.example not found, creating minimal .env"
-        echo "HOST_SCAN_PATH=$HOME" > .env
-        echo "BACKEND_HOST=127.0.0.1" >> .env
-        echo "BACKEND_PORT=8000" >> .env
-        echo "REDIS_HOST=localhost" >> .env
-        echo "REDIS_PORT=6379" >> .env
-        echo "HOST_ROOT=" >> .env
-    fi
+    info "Arquitectura: Intel (x86_64)"
+    JAVAFX_PLATFORM="mac"
 fi
 
-# Run xattr to bypass Gatekeeper on the compiled JAR
-echo "[INFO] Applying macOS compatibility attributes..."
-if [ -f "frontend/target/*.jar" ]; then
-    find frontend/target -name "*.jar" -exec xattr -cr {} \;
-    echo "[OK] Gatekeeper bypass applied to JAR files"
+# ── 1. Verificar herramientas ──────────────────────────────────────────────────
+
+step "1/7" "Verificando herramientas necesarias..."
+
+# Xcode CLI tools
+xcode-select -p >/dev/null 2>&1 || error "Xcode Command Line Tools no encontrado.\n  Instala con: xcode-select --install"
+ok "Xcode Command Line Tools encontrado"
+
+# Java
+command -v java >/dev/null 2>&1 || {
+    warn "Java no encontrado. Instalando con Homebrew..."
+    brew install --cask temurin@21
+}
+JAVA_VER=$(java -version 2>&1 | head -1 | cut -d'"' -f2 | cut -d'.' -f1)
+[[ "$JAVA_VER" -ge 21 ]] || error "Necesitas Java 21+. Tienes Java $JAVA_VER."
+ok "Java $JAVA_VER encontrado"
+
+command -v jpackage >/dev/null 2>&1 || error "jpackage no encontrado. Asegurate de tener el JDK completo."
+ok "jpackage encontrado"
+
+# Python
+command -v python3 >/dev/null 2>&1 || {
+    warn "Python3 no encontrado. Instalando con Homebrew..."
+    brew install python@3.11
+}
+PY_VER=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+ok "Python $PY_VER encontrado"
+
+# Maven
+command -v mvn >/dev/null 2>&1 || {
+    warn "Maven no encontrado. Instalando con Homebrew..."
+    brew install maven
+}
+ok "Maven encontrado"
+
+# create-dmg (opcional, para DMG con fondo personalizado)
+if command -v create-dmg >/dev/null 2>&1; then
+    USE_CREATE_DMG=true
+    ok "create-dmg encontrado (DMG con estilo)"
 else
-    echo "[WARN] No JAR files found to apply Gatekeeper bypass"
+    USE_CREATE_DMG=false
+    warn "create-dmg no encontrado. Se usara hdiutil (DMG basico)."
+    warn "Para instalar: brew install create-dmg"
 fi
 
-# Start backend
-echo "[INFO] Starting backend server..."
-source backend/.venv/bin/activate
+# ── 2. Limpiar directorios previos ─────────────────────────────────────────────
+
+step "2/7" "Limpiando builds anteriores..."
+rm -rf "$DIST_DIR" "$INSTALLER_DIR"
+mkdir -p "$BACKEND_DIST" "$FRONTEND_DIST" "$INSTALLER_DIR"
+ok "Directorios limpios"
+
+# ── 3. Empaquetar backend con PyInstaller ──────────────────────────────────────
+
+step "3/7" "Empaquetando backend Python con PyInstaller..."
+
 cd backend
-uvicorn main:app --host 127.0.0.1 --port 8000 &
-BACKEND_PID=$!
+rm -rf .venv-pkg
+python3 -m venv .venv-pkg
+source .venv-pkg/bin/activate
+
+pip install --quiet --upgrade pip
+pip install --quiet -r requirements.txt
+pip install --quiet pyinstaller
+
+pyinstaller --onefile \
+    --name sfo-backend \
+    --distpath "../$BACKEND_DIST" \
+    --workpath "../$DIST_DIR/pyinstaller-tmp" \
+    --specpath "../$DIST_DIR" \
+    --hidden-import=uvicorn.logging \
+    --hidden-import=uvicorn.loops \
+    --hidden-import=uvicorn.loops.auto \
+    --hidden-import=uvicorn.protocols \
+    --hidden-import=uvicorn.protocols.http \
+    --hidden-import=uvicorn.protocols.http.auto \
+    --hidden-import=uvicorn.protocols.websockets \
+    --hidden-import=uvicorn.protocols.websockets.auto \
+    --hidden-import=uvicorn.lifespan \
+    --hidden-import=uvicorn.lifespan.on \
+    --hidden-import=anyio._backends._asyncio \
+    --collect-all fastapi \
+    --collect-all pydantic \
+    --target-arch "$ARCH" \
+    --noconfirm \
+    main.py
+
+deactivate
 cd ..
+ok "Backend empaquetado: $BACKEND_DIST/sfo-backend"
 
-# Setup cleanup trap
-trap "echo '[INFO] Stopping backend...'; kill $BACKEND_PID 2>/dev/null" EXIT
+# ── 4. Compilar frontend con Maven ─────────────────────────────────────────────
 
-# Wait for backend to start
-echo "[INFO] Waiting for backend to start..."
-sleep 3
-
-# Launch frontend
-echo "[INFO] Launching frontend application..."
+step "4/7" "Compilando frontend con Maven..."
 cd frontend
-mvn javafx:run
+mvn clean package -DskipTests -q -Djavafx.platform="$JAVAFX_PLATFORM"
 cd ..
+ok "Frontend compilado"
 
-echo "[OK] Application closed successfully"
-echo "[INFO] Build script completed"
+# ── 5. Empaquetar frontend con jpackage ────────────────────────────────────────
+
+step "5/7" "Empaquetando frontend con jpackage (incluye JRE)..."
+
+JPACKAGE_ARGS=(
+    --type app-image
+    --name "$APP_NAME"
+    --app-version "$APP_VERSION"
+    --input frontend/target
+    --dest "$FRONTEND_DIST"
+    --main-jar frontend-1.0.0.jar
+    --main-class "$MAIN_CLASS"
+    --java-options "--enable-preview"
+    --java-options "-Xmx512m"
+    --java-options "--add-opens=javafx.graphics/com.sun.javafx.application=ALL-UNNAMED"
+    --mac-package-identifier "$BUNDLE_ID"
+    --mac-package-name "$APP_DISPLAY_NAME"
+)
+
+# Agregar firma si se configuró
+if [[ -n "$SIGN_IDENTITY" ]]; then
+    JPACKAGE_ARGS+=(--mac-sign --mac-signing-key-user-name "$SIGN_IDENTITY")
+    info "Firmando con: $SIGN_IDENTITY"
+fi
+
+jpackage "${JPACKAGE_ARGS[@]}"
+
+ok "Frontend empaquetado: $FRONTEND_DIST/$APP_NAME.app"
+
+# ── 6. Crear bundle .app que lanza backend + frontend ─────────────────────────
+
+step "6/7" "Configurando bundle .app unificado..."
+
+APP_BUNDLE="$FRONTEND_DIST/$APP_NAME.app"
+
+# Copiar backend dentro del .app bundle
+mkdir -p "$APP_BUNDLE/Contents/MacOS/backend"
+cp "$BACKEND_DIST/sfo-backend" "$APP_BUNDLE/Contents/MacOS/backend/"
+chmod +x "$APP_BUNDLE/Contents/MacOS/backend/sfo-backend"
+
+# Renombrar el launcher original de jpackage y crear uno nuevo que arranca ambos
+ORIGINAL_LAUNCHER="$APP_BUNDLE/Contents/MacOS/$APP_NAME"
+mv "$ORIGINAL_LAUNCHER" "$APP_BUNDLE/Contents/MacOS/${APP_NAME}-ui"
+
+cat > "$ORIGINAL_LAUNCHER" << LAUNCHER
+#!/bin/bash
+# Launcher principal del bundle .app
+# Arranca el backend FastAPI y luego el frontend JavaFX
+
+DIR="\$(cd "\$(dirname "\$0")" && pwd)"
+BACKEND="\$DIR/backend/sfo-backend"
+FRONTEND="\$DIR/${APP_NAME}-ui"
+
+# Directorio de datos del usuario
+DATA_DIR="\$HOME/.smartfileorganizer"
+mkdir -p "\$DATA_DIR"
+
+# Crear .env si no existe
+if [ ! -f "\$DATA_DIR/.env" ]; then
+    cat > "\$DATA_DIR/.env" << 'ENV'
+HOST_SCAN_PATH=/Users
+BACKEND_HOST=127.0.0.1
+BACKEND_PORT=8000
+REDIS_HOST=localhost
+REDIS_PORT=6379
+HOST_ROOT=
+DB_PATH=~/.smartfileorganizer/sfo.db
+ENV
+fi
+
+# Arrancar backend
+export DB_PATH="\$DATA_DIR/sfo.db"
+"\$BACKEND" &
+BACKEND_PID=\$!
+
+# Esperar a que el backend esté listo
+for i in \$(seq 1 20); do
+    if curl -sf http://127.0.0.1:8000/api/health >/dev/null 2>&1; then
+        break
+    fi
+    sleep 0.5
+done
+
+# Arrancar frontend
+"\$FRONTEND"
+FRONTEND_EXIT=\$?
+
+# Apagar backend
+kill "\$BACKEND_PID" 2>/dev/null
+wait "\$BACKEND_PID" 2>/dev/null
+
+exit \$FRONTEND_EXIT
+LAUNCHER
+
+chmod +x "$ORIGINAL_LAUNCHER"
+
+# Quitar atributos de cuarentena de Gatekeeper en los binarios
+xattr -cr "$APP_BUNDLE" 2>/dev/null || true
+
+ok "Bundle .app configurado"
+
+# ── 7. Crear DMG ───────────────────────────────────────────────────────────────
+
+step "7/7" "Creando DMG..."
+
+DMG_OUTPUT="$INSTALLER_DIR/${APP_NAME}-${APP_VERSION}.dmg"
+
+if [[ "$USE_CREATE_DMG" == true ]]; then
+    # DMG con fondo personalizado y layout tipo "arrastra a Applications"
+    create-dmg \
+        --volname "$APP_DISPLAY_NAME" \
+        --volicon "$APP_BUNDLE/Contents/Resources/$APP_NAME.icns" \
+        --window-pos 200 120 \
+        --window-size 600 400 \
+        --icon-size 128 \
+        --icon "${APP_NAME}.app" 150 185 \
+        --hide-extension "${APP_NAME}.app" \
+        --app-drop-link 450 185 \
+        --no-internet-enable \
+        "$DMG_OUTPUT" \
+        "$FRONTEND_DIST/"
+else
+    # DMG basico con hdiutil (incluido en macOS)
+    TEMP_DMG="$DIST_DIR/temp.dmg"
+    hdiutil create -size 800m -fs HFS+ -volname "$APP_DISPLAY_NAME" "$TEMP_DMG"
+    MOUNT_POINT=$(hdiutil attach "$TEMP_DMG" | grep Volumes | awk '{print $3}')
+    cp -r "$APP_BUNDLE" "$MOUNT_POINT/"
+    ln -s /Applications "$MOUNT_POINT/Applications"
+    hdiutil detach "$MOUNT_POINT"
+    hdiutil convert "$TEMP_DMG" -format UDZO -o "$DMG_OUTPUT"
+    rm "$TEMP_DMG"
+fi
+
+echo ""
+echo "========================================================="
+ok "LISTO"
+info "DMG generado:"
+info "  $DMG_OUTPUT"
+info ""
+info "El usuario instala arrastrando la app a la carpeta Applications."
+info "No requiere instalar Java, Python ni nada mas."
+if [[ -z "$SIGN_IDENTITY" ]]; then
+    warn ""
+    warn "Sin firma de codigo: el usuario vera un aviso de Gatekeeper."
+    warn "Instruccion para el usuario: clic derecho -> Abrir -> Abrir."
+    warn "Para firmar, configura SIGN_IDENTITY en este script."
+fi
+echo "========================================================="

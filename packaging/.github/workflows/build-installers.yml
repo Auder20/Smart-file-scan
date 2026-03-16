@@ -1,0 +1,511 @@
+# ============================================================
+#  Smart File Organizer — GitHub Actions CI/CD
+#  
+#  Genera los 3 instaladores automaticamente en cada release:
+#    - Windows:  SmartFileOrganizer-1.0.0-setup.exe
+#    - macOS:    SmartFileOrganizer-1.0.0.dmg
+#    - Linux:    SmartFileOrganizer-1.0.0-x86_64.AppImage
+#
+#  Como usarlo:
+#    1. Sube tu proyecto a GitHub
+#    2. Crea este archivo en .github/workflows/build-installers.yml
+#    3. Para lanzar un release:
+#         git tag v1.0.0
+#         git push origin v1.0.0
+#    4. GitHub Actions compila en los 3 OS y sube los instaladores
+#       automaticamente a la seccion "Releases" de tu repositorio.
+#
+#  Los 3 runners corren EN PARALELO — tarda lo mismo que el mas lento.
+# ============================================================
+
+name: Build Installers
+
+on:
+  # Se dispara al crear un tag vX.X.X (ej: git tag v1.0.0 && git push --tags)
+  push:
+    tags:
+      - 'v*.*.*'
+  
+  # Permite ejecutarlo manualmente desde la UI de GitHub (para pruebas)
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version a construir (ej: 1.0.0)'
+        required: true
+        default: '1.0.0'
+
+# Extraer version del tag o del input manual
+env:
+  APP_NAME: SmartFileOrganizer
+  APP_VERSION: ${{ github.event.inputs.version || github.ref_name }}
+
+jobs:
+
+  # ────────────────────────────────────────────────────────────
+  #  Windows — genera .exe con Inno Setup
+  # ────────────────────────────────────────────────────────────
+  build-windows:
+    name: Windows (.exe)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout codigo
+        uses: actions/checkout@v4
+
+      - name: Configurar Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Configurar Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Instalar Inno Setup
+        run: |
+          choco install innosetup --yes --no-progress
+        shell: pwsh
+
+      - name: Instalar dependencias Python
+        run: |
+          cd backend
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Empaquetar backend con PyInstaller
+        run: |
+          cd backend
+          pyinstaller --onefile `
+            --name sfo-backend `
+            --distpath "../dist/win/backend" `
+            --hidden-import=uvicorn.logging `
+            --hidden-import=uvicorn.loops `
+            --hidden-import=uvicorn.loops.auto `
+            --hidden-import=uvicorn.protocols `
+            --hidden-import=uvicorn.protocols.http `
+            --hidden-import=uvicorn.protocols.http.auto `
+            --hidden-import=uvicorn.protocols.websockets `
+            --hidden-import=uvicorn.protocols.websockets.auto `
+            --hidden-import=uvicorn.lifespan `
+            --hidden-import=uvicorn.lifespan.on `
+            --hidden-import=anyio._backends._asyncio `
+            --collect-all fastapi `
+            --collect-all pydantic `
+            --noconfirm `
+            main.py
+        shell: pwsh
+
+      - name: Compilar frontend con Maven
+        run: |
+          cd frontend
+          mvn clean package -DskipTests -q
+
+      - name: Empaquetar frontend con jpackage
+        run: |
+          $version = "${{ env.APP_VERSION }}".TrimStart('v')
+          jpackage `
+            --type app-image `
+            --name "${{ env.APP_NAME }}" `
+            --app-version $version `
+            --input frontend/target `
+            --dest dist/win/frontend `
+            --main-jar frontend-1.0.0.jar `
+            --main-class com.smartfileorganizer.Main `
+            --java-options "--enable-preview" `
+            --java-options "-Xmx512m" `
+            --win-console
+        shell: pwsh
+
+      - name: Generar script Inno Setup y compilar instalador
+        run: |
+          $version = "${{ env.APP_NAME }}".TrimStart('v')
+          $root = (Get-Location).Path
+          
+          New-Item -ItemType Directory -Force dist/installer | Out-Null
+          
+          $iss = @"
+          #define MyAppName      "${{ env.APP_NAME }}"
+          #define MyAppVersion   "$version"
+          #define MyAppExeName   "${{ env.APP_NAME }}.exe"
+          #define FrontendDir    "$root\dist\win\frontend\${{ env.APP_NAME }}"
+          #define BackendExe     "$root\dist\win\backend\sfo-backend.exe"
+
+          [Setup]
+          AppId={{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}
+          AppName={#MyAppName}
+          AppVersion={#MyAppVersion}
+          DefaultDirName={autopf}\{#MyAppName}
+          DefaultGroupName={#MyAppName}
+          OutputDir=$root\dist\installer
+          OutputBaseFilename=${{ env.APP_NAME }}-$version-setup
+          Compression=lzma2/ultra64
+          SolidCompression=yes
+          WizardStyle=modern
+          PrivilegesRequired=lowest
+          ArchitecturesAllowed=x64
+          ArchitecturesInstallIn64BitMode=x64
+
+          [Languages]
+          Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"
+          Name: "english"; MessagesFile: "compiler:Default.isl"
+
+          [Tasks]
+          Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
+
+          [Files]
+          Source: "{#FrontendDir}\*"; DestDir: "{app}\frontend"; Flags: ignoreversion recursesubdirs createallsubdirs
+          Source: "{#BackendExe}";    DestDir: "{app}\backend";  Flags: ignoreversion
+
+          [Icons]
+          Name: "{group}\{#MyAppName}";            Filename: "{app}\frontend\{#MyAppExeName}"
+          Name: "{autodesktop}\{#MyAppName}";       Filename: "{app}\frontend\{#MyAppExeName}"; Tasks: desktopicon
+          Name: "{group}\Desinstalar {#MyAppName}"; Filename: "{uninstallexe}"
+
+          [Run]
+          Filename: "{app}\frontend\{#MyAppExeName}"; Description: "Iniciar {#MyAppName}"; Flags: nowait postinstall skipifsilent
+          "@
+          
+          $iss | Out-File -FilePath dist/installer/installer.iss -Encoding UTF8
+          
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" dist\installer\installer.iss
+        shell: pwsh
+
+      - name: Subir artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: dist/installer/${{ env.APP_NAME }}-*-setup.exe
+          retention-days: 7
+
+  # ────────────────────────────────────────────────────────────
+  #  macOS — genera .dmg
+  # ────────────────────────────────────────────────────────────
+  build-macos:
+    name: macOS (.dmg)
+    runs-on: macos-latest   # Corre en Apple Silicon (M1) en GitHub
+
+    steps:
+      - name: Checkout codigo
+        uses: actions/checkout@v4
+
+      - name: Configurar Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Configurar Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Instalar create-dmg
+        run: brew install create-dmg
+
+      - name: Instalar dependencias Python
+        run: |
+          cd backend
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Empaquetar backend con PyInstaller
+        run: |
+          cd backend
+          pyinstaller --onefile \
+            --name sfo-backend \
+            --distpath "../dist/mac/backend" \
+            --hidden-import=uvicorn.logging \
+            --hidden-import=uvicorn.loops.auto \
+            --hidden-import=uvicorn.protocols.http.auto \
+            --hidden-import=uvicorn.protocols.websockets.auto \
+            --hidden-import=uvicorn.lifespan.on \
+            --hidden-import=anyio._backends._asyncio \
+            --collect-all fastapi \
+            --collect-all pydantic \
+            --target-arch arm64 \
+            --noconfirm \
+            main.py
+
+      - name: Compilar frontend con Maven
+        run: |
+          cd frontend
+          mvn clean package -DskipTests -q -Djavafx.platform=mac-aarch64
+
+      - name: Empaquetar frontend con jpackage
+        run: |
+          VERSION="${{ env.APP_VERSION }}"
+          VERSION="${VERSION#v}"
+          jpackage \
+            --type app-image \
+            --name "${{ env.APP_NAME }}" \
+            --app-version "$VERSION" \
+            --input frontend/target \
+            --dest dist/mac/frontend \
+            --main-jar frontend-1.0.0.jar \
+            --main-class com.smartfileorganizer.Main \
+            --java-options "--enable-preview" \
+            --java-options "-Xmx512m" \
+            --mac-package-identifier com.smartfileorganizer.app \
+            --mac-package-name "Smart File Organizer"
+
+      - name: Configurar launcher del bundle
+        run: |
+          APP_BUNDLE="dist/mac/frontend/${{ env.APP_NAME }}.app"
+          
+          # Copiar backend dentro del bundle
+          mkdir -p "$APP_BUNDLE/Contents/MacOS/backend"
+          cp dist/mac/backend/sfo-backend "$APP_BUNDLE/Contents/MacOS/backend/"
+          chmod +x "$APP_BUNDLE/Contents/MacOS/backend/sfo-backend"
+          
+          # Renombrar launcher original y crear wrapper
+          mv "$APP_BUNDLE/Contents/MacOS/${{ env.APP_NAME }}" \
+             "$APP_BUNDLE/Contents/MacOS/${{ env.APP_NAME }}-ui"
+          
+          cat > "$APP_BUNDLE/Contents/MacOS/${{ env.APP_NAME }}" << 'LAUNCHER'
+          #!/bin/bash
+          DIR="$(cd "$(dirname "$0")" && pwd)"
+          DATA_DIR="$HOME/.smartfileorganizer"
+          mkdir -p "$DATA_DIR"
+          export DB_PATH="$DATA_DIR/sfo.db"
+          "$DIR/backend/sfo-backend" &
+          BACKEND_PID=$!
+          for i in $(seq 1 20); do
+            curl -sf http://127.0.0.1:8000/api/health >/dev/null 2>&1 && break
+            sleep 0.5
+          done
+          "$DIR/${{ env.APP_NAME }}-ui"
+          kill "$BACKEND_PID" 2>/dev/null
+          LAUNCHER
+          
+          chmod +x "$APP_BUNDLE/Contents/MacOS/${{ env.APP_NAME }}"
+          xattr -cr "$APP_BUNDLE" 2>/dev/null || true
+
+      - name: Crear DMG
+        run: |
+          VERSION="${{ env.APP_VERSION }}"
+          VERSION="${VERSION#v}"
+          mkdir -p dist/installer
+          
+          create-dmg \
+            --volname "Smart File Organizer" \
+            --window-pos 200 120 \
+            --window-size 600 400 \
+            --icon-size 128 \
+            --icon "${{ env.APP_NAME }}.app" 150 185 \
+            --hide-extension "${{ env.APP_NAME }}.app" \
+            --app-drop-link 450 185 \
+            --no-internet-enable \
+            "dist/installer/${{ env.APP_NAME }}-${VERSION}.dmg" \
+            "dist/mac/frontend/"
+
+      - name: Subir artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-installer
+          path: dist/installer/${{ env.APP_NAME }}-*.dmg
+          retention-days: 7
+
+  # ────────────────────────────────────────────────────────────
+  #  Linux — genera .AppImage
+  # ────────────────────────────────────────────────────────────
+  build-linux:
+    name: Linux (.AppImage)
+    runs-on: ubuntu-22.04   # Ubuntu LTS para maxima compatibilidad
+
+    steps:
+      - name: Checkout codigo
+        uses: actions/checkout@v4
+
+      - name: Configurar Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Configurar Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Instalar dependencias del sistema
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            fuse libfuse2 \
+            libgtk-3-0 libxss1 libnss3 libasound2 \
+            libglib2.0-0 libdbus-1-3
+
+      - name: Descargar appimagetool
+        run: |
+          curl -Lo /usr/local/bin/appimagetool \
+            "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage"
+          chmod +x /usr/local/bin/appimagetool
+
+      - name: Instalar dependencias Python
+        run: |
+          cd backend
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Empaquetar backend con PyInstaller
+        run: |
+          cd backend
+          pyinstaller --onefile \
+            --name sfo-backend \
+            --distpath "../dist/linux/backend" \
+            --hidden-import=uvicorn.logging \
+            --hidden-import=uvicorn.loops.auto \
+            --hidden-import=uvicorn.protocols.http.auto \
+            --hidden-import=uvicorn.protocols.websockets.auto \
+            --hidden-import=uvicorn.lifespan.on \
+            --hidden-import=anyio._backends._asyncio \
+            --collect-all fastapi \
+            --collect-all pydantic \
+            --noconfirm \
+            main.py
+
+      - name: Compilar frontend con Maven
+        run: |
+          cd frontend
+          mvn clean package -DskipTests -q
+
+      - name: Empaquetar frontend con jpackage
+        run: |
+          VERSION="${{ env.APP_VERSION }}"
+          VERSION="${VERSION#v}"
+          jpackage \
+            --type app-image \
+            --name "${{ env.APP_NAME }}" \
+            --app-version "$VERSION" \
+            --input frontend/target \
+            --dest dist/linux/frontend \
+            --main-jar frontend-1.0.0.jar \
+            --main-class com.smartfileorganizer.Main \
+            --java-options "--enable-preview" \
+            --java-options "-Xmx512m"
+
+      - name: Construir estructura AppDir
+        run: |
+          APPDIR="dist/linux/AppDir"
+          mkdir -p "$APPDIR/usr/share/icons/hicolor/256x256/apps"
+          
+          # Frontend con JRE
+          cp -r "dist/linux/frontend/${{ env.APP_NAME }}" "$APPDIR/frontend"
+          
+          # Backend (Python embebido)
+          mkdir -p "$APPDIR/backend"
+          cp dist/linux/backend/sfo-backend "$APPDIR/backend/"
+          chmod +x "$APPDIR/backend/sfo-backend"
+          
+          # Icono placeholder (reemplaza con tu PNG 256x256 real)
+          cp /usr/share/icons/hicolor/48x48/apps/xterm.png \
+             "$APPDIR/usr/share/icons/hicolor/256x256/apps/smartfileorganizer.png" 2>/dev/null || \
+          printf '\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x01\x00\x00\x00\x01\x00\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\x0f\x00\x00\x01\x01\x00\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82' \
+             > "$APPDIR/usr/share/icons/hicolor/256x256/apps/smartfileorganizer.png"
+          
+          # .desktop
+          cat > "$APPDIR/smartfileorganizer.desktop" << 'DESKTOP'
+          [Desktop Entry]
+          Name=Smart File Organizer
+          Comment=Organiza y analiza tus archivos
+          Exec=SmartFileOrganizer
+          Icon=smartfileorganizer
+          Type=Application
+          Categories=Utility;FileManager;
+          DESKTOP
+          
+          # AppRun
+          cat > "$APPDIR/AppRun" << 'APPRUN'
+          #!/usr/bin/env bash
+          APPDIR="$(dirname "$(readlink -f "$0")")"
+          DATA_DIR="$HOME/.smartfileorganizer"
+          mkdir -p "$DATA_DIR"
+          export DB_PATH="$DATA_DIR/sfo.db"
+          "$APPDIR/backend/sfo-backend" &
+          BACKEND_PID=$!
+          for i in $(seq 1 20); do
+            curl -sf http://127.0.0.1:8000/api/health >/dev/null 2>&1 && break
+            sleep 0.5
+          done
+          "$APPDIR/frontend/SmartFileOrganizer/bin/SmartFileOrganizer"
+          kill "$BACKEND_PID" 2>/dev/null
+          APPRUN
+          
+          chmod +x "$APPDIR/AppRun"
+
+      - name: Generar AppImage
+        run: |
+          VERSION="${{ env.APP_VERSION }}"
+          VERSION="${VERSION#v}"
+          mkdir -p dist/installer
+          ARCH=x86_64 appimagetool \
+            dist/linux/AppDir \
+            "dist/installer/${{ env.APP_NAME }}-${VERSION}-x86_64.AppImage"
+          chmod +x dist/installer/*.AppImage
+
+      - name: Subir artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-installer
+          path: dist/installer/${{ env.APP_NAME }}-*-x86_64.AppImage
+          retention-days: 7
+
+  # ────────────────────────────────────────────────────────────
+  #  Release — sube los 3 instaladores a GitHub Releases
+  #  Solo se ejecuta si los 3 builds terminaron OK
+  # ────────────────────────────────────────────────────────────
+  create-release:
+    name: Crear Release en GitHub
+    needs: [build-windows, build-macos, build-linux]
+    runs-on: ubuntu-latest
+    # Solo crear release en push de tag, no en workflow_dispatch
+    if: startsWith(github.ref, 'refs/tags/')
+
+    permissions:
+      contents: write   # necesario para crear el release
+
+    steps:
+      - name: Descargar todos los artefactos
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Listar artefactos descargados
+        run: ls -la artifacts/
+
+      - name: Crear GitHub Release y subir instaladores
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Smart File Organizer ${{ github.ref_name }}
+          body: |
+            ## Smart File Organizer ${{ github.ref_name }}
+
+            ### Descargas
+
+            | Sistema | Archivo | Notas |
+            |---------|---------|-------|
+            | Windows 10/11 | `SmartFileOrganizer-*-setup.exe` | Doble clic para instalar |
+            | macOS 12+ | `SmartFileOrganizer-*.dmg` | Arrastra a Applications |
+            | Linux x86_64 | `SmartFileOrganizer-*-x86_64.AppImage` | `chmod +x` y ejecutar |
+
+            ### No requiere instalar Java ni Python
+            Todos los instaladores incluyen sus propias dependencias.
+
+            ### macOS — aviso de Gatekeeper
+            Si ves "aplicación no verificada", haz clic derecho → Abrir → Abrir.
+          draft: false
+          prerelease: false
+          files: artifacts/*
+          generate_release_notes: true

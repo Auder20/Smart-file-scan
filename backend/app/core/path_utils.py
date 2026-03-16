@@ -70,50 +70,25 @@ def translate_path_from_docker(docker_path: str) -> str:
 def normalize_scan_path(path: str) -> str:
     """
     Resuelve una ruta de escaneo para que sea accesible dentro del contenedor.
-
-    FIX v3: el explorador de carpetas puede devolver rutas en tres formatos
-    distintos dependiendo del entorno. Esta función los maneja todos:
-
-      Formato 1 — Ruta nativa Windows:
-        D:\\Usuarios  →  /host/d/Usuarios
-        (HOST_ROOT=/host, el backend traduce)
-
-      Formato 2 — Ruta ya en formato Docker con prefijo completo:
-        /host/d/Usuarios  →  /host/d/Usuarios   (sin cambio)
-
-      Formato 3 — Ruta Linux dentro del contenedor (sin HOST_ROOT):
-        /mnt/host/d/...  →  /mnt/host/d/...    (sin cambio, existe tal cual)
-
-      Formato 4 — Modo nativo (HOST_ROOT vacío):
-        /home/user  →  /home/user              (sin cambio)
-
-    La clave del bug v3: /mnt/host/d/estos llegaba como formato 3 pero
-    resolve_path_for_docker lo trataba como formato 4 y añadía /host,
-    produciendo /host/mnt/host/d/estos que no existe.
-
-    Solución: probar primero si la ruta existe tal como llega. Si existe,
-    usarla directamente. Solo traducir si no existe.
     """
     host_root = os.getenv("HOST_ROOT", "").rstrip("/")
 
-    # Paso 1: si la ruta existe tal como está, usarla directamente.
-    # Esto cubre el Formato 2 (/host/d/...) y el Formato 3 (/mnt/host/...).
-    if os.path.exists(path):
+    # Modo nativo: sin Docker, devolver normalizado
+    if not host_root:
+        return os.path.normpath(path)
+
+    # Ya tiene prefijo Docker correcto → no tocar
+    if path.startswith(host_root + "/") or path == host_root:
         return path
 
-    # Paso 2: si no existe, intentar traducción nativa → Docker.
-    # Esto cubre el Formato 1 (D:\\Usuarios → /host/d/Usuarios).
-    if host_root:
-        translated = resolve_path_for_docker(path)
-        if translated != path and os.path.exists(translated):
-            return translated
+    # En Docker: traducir siempre primero, luego verificar existencia
+    translated = resolve_path_for_docker(path)
+    if os.path.exists(translated):
+        return translated
 
-    # Paso 3: devolver la ruta traducida aunque no exista (el scanner
-    # reportará el error con la ruta correcta en vez de una doblemente prefijada).
-    if host_root:
-        return resolve_path_for_docker(path)
-
-    return os.path.normpath(path)
+    # Último recurso: devolver traducido aunque no exista
+    # (el scanner reportará el error con la ruta correcta)
+    return translated
 
 
 def is_blocked_path(path: str) -> bool:

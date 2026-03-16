@@ -21,6 +21,10 @@ import com.smartfileorganizer.utils.UIUtils;
 import com.smartfileorganizer.utils.ConcurrencyUtils;
 
 import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.util.prefs.Preferences;
+import javafx.stage.FileChooser;
 import java.net.URL;
 import java.util.ResourceBundle;
 import java.util.List;
@@ -46,6 +50,7 @@ public class ScannerController implements Initializable {
     @FXML private Button            btnStopScan;
     @FXML private Button            btnRefresh;
     @FXML private Label             lblStatus;
+    @FXML private javafx.scene.shape.Circle statusIndicator;
     @FXML private VBox              progressSection;
     @FXML private ProgressBar       progressBar;
     @FXML private Label             lblProgress;
@@ -82,6 +87,13 @@ public class ScannerController implements Initializable {
         apiClient = new ApiClient();
         setupTable();
         setupListeners();
+        
+        Preferences prefs = Preferences.userNodeForPackage(ScannerController.class);
+        String lastPath = prefs.get("last_scanned_path", "");
+        if (!lastPath.isEmpty()) {
+            txtFolderPath.setText(lastPath);
+        }
+        
         refreshScans();
     }
 
@@ -110,15 +122,7 @@ public class ScannerController implements Initializable {
             List<Map<String, Object>> drives = apiClient.getAvailableDrives();
             showFolderSelectionDialog(drives);
         } catch (Exception e) {
-            DirectoryChooser dc = new DirectoryChooser();
-            dc.setTitle("Seleccionar Carpeta");
-            String current = txtFolderPath.getText();
-            if (current != null && !current.trim().isEmpty()) {
-                File dir = new File(current);
-                if (dir.exists()) dc.setInitialDirectory(dir);
-            }
-            File selected = dc.showDialog(getStage());
-            if (selected != null) txtFolderPath.setText(selected.getAbsolutePath());
+            UIUtils.showErrorDialog("Error", "Usa el explorador de carpetas integrado. " + e.getMessage());
         }
     }
 
@@ -208,7 +212,7 @@ public class ScannerController implements Initializable {
 
         CompletableFuture.runAsync(() -> {
             try {
-                List<Map<String, Object>> folders = apiClient.exploreFolders(rootPath, false, 2);
+                List<Map<String, Object>> folders = apiClient.exploreFolders(rootPath, false, 1);
                 Platform.runLater(() -> {
                     rootItem.getChildren().clear();
                     rootItem.setValue(new PathItem(rootPath, rootPath));
@@ -227,13 +231,12 @@ public class ScannerController implements Initializable {
                             item.getChildren().add(
                                 new TreeItem<>(new PathItem("Loading...", "")));
                             item.expandedProperty().addListener((obs, was, now) -> {
-                                if (now
-                                    && item.getChildren().size() == 1
-                                    && "Loading...".equals(
-                                           item.getChildren().get(0).getValue().toString())) {
+                                if (now && item.getChildren().size() == 1 && "Loading...".equals(item.getChildren().get(0).getValue().toString())) {
                                     loadSubFolders(item, fp);
                                 }
                             });
+                        } else {
+                            // Fix phantom arrow: Empty node to show it contains 0 folders, or just don't add dummy node.
                         }
                         rootItem.getChildren().add(item);
                     }
@@ -257,11 +260,18 @@ public class ScannerController implements Initializable {
                         String fp = (String) f.get("path");
                         String fn = (String) f.get("name");
                         Object fc = f.get("file_count");
-                        TreeItem<PathItem> item = new TreeItem<>(
-                            new PathItem(
-                                fn + (fc != null ? " (" + fc + " archivos)" : ""), fp));
-                        item.getChildren().add(
-                            new TreeItem<>(new PathItem("Loading...", "")));
+                        TreeItem<PathItem> item = new TreeItem<>(new PathItem(fn + (fc != null ? " (" + fc + " archivos)" : ""), fp));
+                        
+                        // We do not know if subfolder has more, we add dummy to allow expanding.
+                        if (!fn.contains("(sin acceso)")) {
+                            item.getChildren().add(new TreeItem<>(new PathItem("Loading...", "")));
+                            item.expandedProperty().addListener((obs, was, now) -> {
+                                if (now && item.getChildren().size() == 1 && "Loading...".equals(item.getChildren().get(0).getValue().toString())) {
+                                    loadSubFolders(item, fp);
+                                }
+                            });
+                        }
+                        
                         parentItem.getChildren().add(item);
                     }
                 });
@@ -281,7 +291,8 @@ public class ScannerController implements Initializable {
             boolean valid = Boolean.TRUE.equals(v.get("valid"));
             String msg = valid
                 ? "Ruta válida"
-                : (String) v.getOrDefault("reason", "Ruta inválida");
+                : ((String) v.getOrDefault("reason", "Ruta inválida") + 
+                  (v.containsKey("resolved_path") ? " (Intentado: " + v.get("resolved_path") + ")" : ""));
             if (valid && v.get("estimated_files") != null) {
                 msg += " (~" + FormatUtils.formatNumber(
                     ((Number) v.get("estimated_files")).intValue()) + " archivos)";
@@ -290,9 +301,11 @@ public class ScannerController implements Initializable {
             lblStatus.setStyle(valid
                 ? "-fx-text-fill: #10B981;"
                 : "-fx-text-fill: #EF4444;");
+            statusIndicator.setFill(javafx.scene.paint.Color.web(valid ? "#10B981" : "#EF4444"));
         } catch (Exception e) {
             lblStatus.setText("Error validando ruta: " + e.getMessage());
             lblStatus.setStyle("-fx-text-fill: #EF4444;");
+            statusIndicator.setFill(javafx.scene.paint.Color.web("#EF4444"));
         }
     }
 
@@ -311,16 +324,23 @@ public class ScannerController implements Initializable {
         progressSection.setVisible(true);  progressSection.setManaged(true);
         resultsSection.setVisible(false);  resultsSection.setManaged(false);
         lblStatus.setText("Iniciando escaneo...");
+        lblStatus.setStyle("-fx-text-fill: #4B9EFF;");
+        statusIndicator.setFill(javafx.scene.paint.Color.web("#4B9EFF"));
         isScanning    = true;
         scanCompleted = false;
 
         ConcurrencyUtils.runAsync(() -> {
             try {
+                Preferences prefs = Preferences.userNodeForPackage(ScannerController.class);
+                prefs.put("last_scanned_path", path);
+
                 currentScanId = apiClient.startScan(
                     path, spinnerMaxDepth.getValue(), chkIncludeHidden.isSelected());
 
                 Platform.runLater(() -> {
                     lblStatus.setText("Escaneando...");
+                    lblStatus.setStyle("-fx-text-fill: #4B9EFF;");
+                    statusIndicator.setFill(javafx.scene.paint.Color.web("#4B9EFF"));
                     apiClient.connectScanWebSocket(
                         currentScanId,
                         this::handleWsMessage,
@@ -333,6 +353,8 @@ public class ScannerController implements Initializable {
                 Platform.runLater(() -> {
                     resetScanUI();
                     lblStatus.setText("Error");
+                    lblStatus.setStyle("-fx-text-fill: #EF4444;");
+                    statusIndicator.setFill(javafx.scene.paint.Color.web("#EF4444"));
                     UIUtils.showErrorDialog("Error",
                         "No se pudo iniciar el escaneo: " + e.getMessage());
                 });
@@ -346,8 +368,12 @@ public class ScannerController implements Initializable {
         if (wsConnected) { apiClient.closeScanWebSocket(); wsConnected = false; }
 
         if (currentScanId != null) {
+            String tempId = currentScanId;
             ConcurrencyUtils.runAsync(() -> {
-                try { apiClient.deleteScan(currentScanId); }
+                try { 
+                    apiClient.deleteScan(tempId); 
+                    Platform.runLater(() -> UIUtils.showInfoDialog("Detenido", "El escaneo ha sido cancelado exitosamente."));
+                }
                 catch (Exception e) {
                     System.err.println("Error cancelling scan: " + e.getMessage());
                 }
@@ -356,6 +382,8 @@ public class ScannerController implements Initializable {
 
         resetScanUI();
         lblStatus.setText("Detenido");
+        lblStatus.setStyle("-fx-text-fill: #E8E8E8;");
+        statusIndicator.setFill(javafx.scene.paint.Color.web("#E8E8E8"));
         refreshScans();
     }
 
@@ -388,6 +416,8 @@ public class ScannerController implements Initializable {
         lblFilesFound.setText(String.format("%,d archivos encontrados", found));
         lblCurrentDir.setText(message);
         lblStatus.setText("Escaneando en progreso...");
+        lblStatus.setStyle("-fx-text-fill: #4B9EFF;");
+        statusIndicator.setFill(javafx.scene.paint.Color.web("#4B9EFF"));
     }
 
     private void onScanComplete() {
@@ -397,6 +427,8 @@ public class ScannerController implements Initializable {
         if (wsConnected) { apiClient.closeScanWebSocket(); wsConnected = false; }
         resetScanUI();
         lblStatus.setText("✅ Completado");
+        lblStatus.setStyle("-fx-text-fill: #10B981;");
+        statusIndicator.setFill(javafx.scene.paint.Color.web("#10B981"));
 
         ConcurrencyUtils.runAsync(() -> {
             try {
@@ -423,6 +455,8 @@ public class ScannerController implements Initializable {
         if (wsConnected) { apiClient.closeScanWebSocket(); wsConnected = false; }
         resetScanUI();
         lblStatus.setText("Error: " + error);
+        lblStatus.setStyle("-fx-text-fill: #EF4444;");
+        statusIndicator.setFill(javafx.scene.paint.Color.web("#EF4444"));
         UIUtils.showErrorDialog("Error de Escaneo", error);
     }
 
@@ -435,7 +469,60 @@ public class ScannerController implements Initializable {
 
     @FXML
     private void exportResults() {
-        UIUtils.showInfoDialog("Info", "Función de exportación próximamente...");
+        if (currentScanId == null) {
+            UIUtils.showErrorDialog("Error", "No hay resultados para exportar.");
+            return;
+        }
+
+        FileChooser fc = new FileChooser();
+        fc.setTitle("Exportar Resultados");
+        fc.getExtensionFilters().addAll(
+            new FileChooser.ExtensionFilter("CSV (*.csv)", "*.csv"),
+            new FileChooser.ExtensionFilter("JSON (*.json)", "*.json")
+        );
+        File file = fc.showSaveDialog(getStage());
+        if (file == null) return;
+
+        ConcurrencyUtils.runAsync(() -> {
+            try {
+                boolean isJson = file.getName().toLowerCase().endsWith(".json");
+                int page = 1;
+                int pageSize = 1000;
+                List<Map<String, Object>> allFiles = new java.util.ArrayList<>();
+                
+                while (true) {
+                    Map<String, Object> resp = apiClient.getScanFiles(currentScanId, page, pageSize);
+                    List<Map<String, Object>> files = (List<Map<String, Object>>) resp.get("files");
+                    if (files != null) allFiles.addAll(files);
+                    
+                    if (!Boolean.TRUE.equals(resp.get("files_truncated"))) break;
+                    int totalPages = ((Number) resp.get("total_pages")).intValue();
+                    if (page >= totalPages) break;
+                    page++;
+                }
+
+                if (isJson) {
+                    try (FileWriter writer = new FileWriter(file)) {
+                        new com.google.gson.GsonBuilder().setPrettyPrinting().create().toJson(allFiles, writer);
+                    }
+                } else {
+                    try (FileWriter writer = new FileWriter(file)) {
+                        writer.write("scan_id,path,name,size,extension,category,modified\n");
+                        for (Map<String, Object> f : allFiles) {
+                            writer.write(String.format("%s,\"%s\",\"%s\",%s,%s,%s,%s\n",
+                                currentScanId,
+                                f.get("path"), f.get("name"), f.get("size"),
+                                f.get("extension"), f.get("category"), f.get("modified")
+                            ));
+                        }
+                    }
+                }
+
+                Platform.runLater(() -> UIUtils.showInfoDialog("Exportación exitosa", "Resultados guardados a " + file.getName()));
+            } catch (Exception e) {
+                Platform.runLater(() -> UIUtils.showErrorDialog("Error", "Fallo al exportar: " + e.getMessage()));
+            }
+        });
     }
 
     @FXML

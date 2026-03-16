@@ -48,15 +48,18 @@ def scan_directory(request: ScanRequest) -> Generator:
 
     # Pila iterativa para evitar RecursionError en estructuras muy profundas
     stack: list[tuple[str, int]] = [(root, 0)]
+    dir_count = 0
+    files_since_last_yield = 0
 
     while stack:
         # Verificar timeout
         if time.time() - start_time > timeout:
             logger.warning(f"Escaneo detenido por timeout en {request.path}")
-            yield {"type": "timeout", "count": count}
+            yield {"type": "timeout", "count": count, "message": "Tiempo límite excedido"}
             return
 
         current_dir, depth = stack.pop()
+        dir_count += 1
 
         if depth > request.max_depth:
             continue
@@ -85,17 +88,27 @@ def scan_directory(request: ScanRequest) -> Generator:
                         file_info = _build_file_info(entry)
                         if file_info is not None:
                             count += 1
+                            files_since_last_yield += 1
                             yield file_info
-                            if count % 50 == 0:
+                            if files_since_last_yield >= 50:
                                 yield {
                                     "type":        "progress",
                                     "count":       count,
                                     "current_dir": current_dir,
                                 }
+                                files_since_last_yield = 0
                     elif is_dir:
                         subdirs.append((entry.path, depth + 1))
 
                 stack.extend(reversed(subdirs))
+                
+                # Report directory progress if we haven't yielded files recently
+                if dir_count % 10 == 0:
+                    yield {
+                        "type":        "progress",
+                        "count":       count,
+                        "current_dir": current_dir,
+                    }
 
         except PermissionError:
             logger.warning(f"Sin permisos: {current_dir}")

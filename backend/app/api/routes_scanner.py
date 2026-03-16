@@ -20,6 +20,7 @@ from app.db.database import (
     get_files_paginated,
 )
 from app.core.scan_store import scan_store
+from app.core.path_utils import resolve_and_validate, normalize_scan_path
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/scan", tags=["scanner"])
@@ -40,6 +41,16 @@ def _notify_ws(data: dict) -> None:
             logger.debug(f"WS send failed, removing dead connection: {e}")
             if ws in _active_connections:
                 _active_connections.remove(ws)
+
+
+@router.get("/validate-path")
+def validate_scan_path(path: str) -> dict:
+    resolved, error = resolve_and_validate(path)
+    if error:
+        return {"valid": False, "reason": error, "resolved_path": resolved}
+    
+    estimated = _estimate_file_count(resolved) if resolved else 0
+    return {"valid": True, "resolved_path": resolved, "estimated_files": estimated}
 
 
 @router.post("", status_code=202)
@@ -198,7 +209,8 @@ def _run_scan(scan_id: str, request: ScanRequest) -> None:
         logger.error(f"Failed to save scan metadata: {e}")
 
     try:
-        estimated = _estimate_file_count(request.path)
+        resolved_estimating_path = normalize_scan_path(request.path)
+        estimated = _estimate_file_count(resolved_estimating_path)
 
         for event in scan_directory(request):
             if cancel_event.is_set():
@@ -217,25 +229,39 @@ def _run_scan(scan_id: str, request: ScanRequest) -> None:
             if isinstance(event, FileInfo):
                 files.append(event)
                 count = len(files)
-                progress.files_found = count
-                progress.message = f"Escaneando… {count:,} archivos encontrados"
-                if estimated > 0:
-                    progress.progress = min(int(count * 100 / estimated), 99)
-
                 if count % 500 == 0:
                     try:
                         save_file_batch(scan_id, files[-500:])
                     except Exception as e:
                         logger.error(f"Failed to save file batch: {e}")
+            elif isinstance(event, dict):
+                etype = event.get("type")
+                if etype in ("error", "timeout"):
+                    logger.error(f"Scan {scan_id} ended with {etype}: {event.get('message', '')}")
+                    progress.status = ScanStatus.FAILED
+                    progress.message = event.get("message", f"Escaneo falló ({etype})")
+                    try:
+                        save_scan_metadata(scan_id, request.path, ScanStatus.FAILED.value)
+                    except Exception:
+                        pass
+                    _notify_ws({"type": "error", "scan_id": scan_id, 
+                                "message": progress.message, "timestamp": datetime.now().isoformat()})
+                    return
+                elif etype == "progress":
+                    count = event.get("count", len(files))
+                    progress.files_found = count
+                    progress.message = f"Escaneando… {count:,} archivos encontrados"
+                    if estimated > 0:
+                        progress.progress = min(int(count * 100 / estimated), 99)
 
-                _notify_ws({
-                    "type": "progress", "scan_id": scan_id,
-                    "progress": progress.progress, "files_found": count,
-                    "message": progress.message,
-                    "current_dir": "",
-                    "parallel_workers": 0,
-                    "timestamp": datetime.now().isoformat(),
-                })
+                    _notify_ws({
+                        "type": "progress", "scan_id": scan_id,
+                        "progress": progress.progress, "files_found": count,
+                        "message": progress.message,
+                        "current_dir": event.get("current_dir", ""),
+                        "parallel_workers": 0,
+                        "timestamp": datetime.now().isoformat(),
+                    })
 
         # Guardar archivos restantes
         last_saved = (len(files) // 500) * 500
