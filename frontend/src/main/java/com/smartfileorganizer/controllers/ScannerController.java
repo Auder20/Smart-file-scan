@@ -37,6 +37,7 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
 import com.smartfileorganizer.api.ApiClient;
+import okhttp3.*;
 import com.smartfileorganizer.models.ScanInfo;
 import com.smartfileorganizer.models.ScanProgress;
 import com.smartfileorganizer.utils.FormatUtils;
@@ -149,8 +150,24 @@ public class ScannerController implements Initializable {
         ButtonType cancelBT = new ButtonType("Cancelar",    ButtonBar.ButtonData.CANCEL_CLOSE);
         dialog.getDialogPane().getButtonTypes().addAll(selectBT, cancelBT);
 
+        // Aplicar tema oscuro al diálogo
+        UIUtils.applyTheme(dialog.getDialogPane());
+        dialog.getDialogPane().setPrefWidth(520);
+        // Estilo botones
+        Node _okBtn = dialog.getDialogPane().lookupButton(selectBT);
+        if (_okBtn != null) _okBtn.setStyle(
+            "-fx-background-color: linear-gradient(to bottom,#5AABFF,#3A8FEE); "
+          + "-fx-text-fill: #0A1628; -fx-font-weight: bold; "
+          + "-fx-background-radius: 6; -fx-padding: 7 16;");
+        Node _cancelBtn = dialog.getDialogPane().lookupButton(cancelBT);
+        if (_cancelBtn != null) _cancelBtn.setStyle(
+            "-fx-background-color: #3C3C3F; -fx-text-fill: #C0C0C5; "
+          + "-fx-border-color: #5A5A60; -fx-border-width: 1; "
+          + "-fx-background-radius: 6; -fx-border-radius: 6; -fx-padding: 7 16;");
+
         VBox content = new VBox(10);
         content.setPadding(new Insets(20));
+        content.setStyle("-fx-background-color: #252526;");
 
         ComboBox<Map<String, Object>> driveCombo = new ComboBox<>();
         driveCombo.getItems().addAll(drives);
@@ -185,10 +202,15 @@ public class ScannerController implements Initializable {
         });
         if (!drives.isEmpty()) driveCombo.getSelectionModel().selectFirst();
 
-        content.getChildren().addAll(
-            new Label("Unidad:"), driveCombo,
-            new Label("Carpetas:"), folderTree
-        );
+        Label lblUnidad   = new Label("Unidad:");
+        Label lblCarpetas = new Label("Carpetas:");
+        lblUnidad.setStyle("-fx-text-fill: #9A9A9F; -fx-font-size: 11px; -fx-font-weight: bold;");
+        lblCarpetas.setStyle("-fx-text-fill: #9A9A9F; -fx-font-size: 11px; -fx-font-weight: bold;");
+        // Estilo TreeView dentro del diálogo
+        folderTree.setStyle(
+            "-fx-background-color: #1A1A1A; -fx-border-color: #3E3E42; "
+          + "-fx-border-width: 1; -fx-border-radius: 6; -fx-background-radius: 6;");
+        content.getChildren().addAll(lblUnidad, driveCombo, lblCarpetas, folderTree);
         dialog.getDialogPane().setContent(content);
 
         Node selectBtn = dialog.getDialogPane().lookupButton(selectBT);
@@ -485,53 +507,67 @@ public class ScannerController implements Initializable {
             return;
         }
 
+        // Diálogo de formato con tema oscuro
+        java.util.Optional<String> choice = UIUtils.showStyledChoiceDialog(
+            "Exportar Resultados",
+            "Selecciona el formato de exportación",
+            "PDF", "PDF", "Excel (.xlsx)", "CSV");
+        if (choice.isEmpty()) return;
+
+        String format;
+        String ext;
+        switch (choice.get()) {
+            case "Excel (.xlsx)" -> { format = "excel"; ext = ".xlsx"; }
+            case "CSV"           -> { format = "csv";   ext = ".csv";  }
+            default              -> { format = "pdf";   ext = ".pdf";  }
+        }
+
         FileChooser fc = new FileChooser();
-        fc.setTitle("Exportar Resultados");
-        fc.getExtensionFilters().addAll(
-            new FileChooser.ExtensionFilter("CSV (*.csv)", "*.csv"),
-            new FileChooser.ExtensionFilter("JSON (*.json)", "*.json")
-        );
+        fc.setTitle("Guardar reporte como...");
+        fc.setInitialFileName("reporte_scan_" + currentScanId + ext);
+        switch (format) {
+            case "pdf"   -> fc.getExtensionFilters().add(
+                new FileChooser.ExtensionFilter("PDF (*.pdf)", "*.pdf"));
+            case "excel" -> fc.getExtensionFilters().add(
+                new FileChooser.ExtensionFilter("Excel (*.xlsx)", "*.xlsx"));
+            default      -> fc.getExtensionFilters().add(
+                new FileChooser.ExtensionFilter("CSV (*.csv)", "*.csv"));
+        }
+
         File file = fc.showSaveDialog(getStage());
         if (file == null) return;
 
+        final String finalFormat = format;
+        final File   finalFile   = file;
+        lblStatus.setText("Generando reporte...");
+        lblStatus.setStyle("-fx-text-fill: #4B9EFF;");
+
         ConcurrencyUtils.runAsync(() -> {
             try {
-                boolean isJson = file.getName().toLowerCase().endsWith(".json");
-                int page = 1;
-                int pageSize = 1000;
-                List<Map<String, Object>> allFiles = new java.util.ArrayList<>();
-                
-                while (true) {
-                    Map<String, Object> resp = apiClient.getScanFiles(currentScanId, page, pageSize);
-                    List<Map<String, Object>> files = (List<Map<String, Object>>) resp.get("files");
-                    if (files != null) allFiles.addAll(files);
-                    
-                    if (!Boolean.TRUE.equals(resp.get("files_truncated"))) break;
-                    int totalPages = ((Number) resp.get("total_pages")).intValue();
-                    if (page >= totalPages) break;
-                    page++;
+                String url = "http://127.0.0.1:8000/api/export/" + currentScanId
+                           + "?format=" + finalFormat;
+                okhttp3.Request req = new okhttp3.Request.Builder().url(url).build();
+                try (okhttp3.Response response = new okhttp3.OkHttpClient.Builder()
+                        .readTimeout(120, java.util.concurrent.TimeUnit.SECONDS)
+                        .build().newCall(req).execute()) {
+                    if (!response.isSuccessful())
+                        throw new RuntimeException("Error " + response.code()
+                            + ": " + (response.body() != null ? response.body().string() : ""));
+                    java.nio.file.Files.write(finalFile.toPath(), response.body().bytes());
                 }
-
-                if (isJson) {
-                    try (FileWriter writer = new FileWriter(file)) {
-                        new com.google.gson.GsonBuilder().setPrettyPrinting().create().toJson(allFiles, writer);
-                    }
-                } else {
-                    try (FileWriter writer = new FileWriter(file)) {
-                        writer.write("scan_id,path,name,size,extension,category,modified\n");
-                        for (Map<String, Object> f : allFiles) {
-                            writer.write(String.format("%s,\"%s\",\"%s\",%s,%s,%s,%s\n",
-                                currentScanId,
-                                f.get("path"), f.get("name"), f.get("size"),
-                                f.get("extension"), f.get("category"), f.get("modified")
-                            ));
-                        }
-                    }
-                }
-
-                Platform.runLater(() -> UIUtils.showInfoDialog("Exportación exitosa", "Resultados guardados a " + file.getName()));
+                Platform.runLater(() -> {
+                    lblStatus.setText("✅ Completado");
+                    lblStatus.setStyle("-fx-text-fill: #10B981;");
+                    UIUtils.showInfoDialog("Exportación exitosa",
+                        "Reporte guardado en:\n" + finalFile.getAbsolutePath());
+                });
             } catch (Exception e) {
-                Platform.runLater(() -> UIUtils.showErrorDialog("Error", "Fallo al exportar: " + e.getMessage()));
+                Platform.runLater(() -> {
+                    lblStatus.setText("Error exportando");
+                    lblStatus.setStyle("-fx-text-fill: #EF4444;");
+                    UIUtils.showErrorDialog("Error al exportar", e.getMessage()
+                        + "\n\nAsegúrate de tener instalado:\n  pip install reportlab openpyxl");
+                });
             }
         });
     }

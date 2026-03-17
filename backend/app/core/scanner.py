@@ -35,9 +35,9 @@ def scan_directory(request: ScanRequest) -> Generator:
     root    = os.path.abspath(resolved_path)
     exclude = set(d.lower() for d in request.exclude_dirs)
     count   = 0
-    max_files   = 100_000
+    max_files   = 0         # Sin límite de archivos
     start_time  = time.time()
-    timeout     = 300  # 5 minutos máximo
+    timeout     = 0         # Sin timeout
 
     if not os.path.isdir(root):
         logger.error(f"Directorio no encontrado: {root} (ruta original: {request.path})")
@@ -52,8 +52,8 @@ def scan_directory(request: ScanRequest) -> Generator:
     files_since_last_yield = 0
 
     while stack:
-        # Verificar timeout
-        if time.time() - start_time > timeout:
+        # Verificar timeout solo si está habilitado (timeout > 0)
+        if timeout > 0 and time.time() - start_time > timeout:
             logger.warning(f"Escaneo detenido por timeout en {request.path}")
             yield {"type": "timeout", "count": count, "message": "Tiempo límite excedido"}
             return
@@ -64,7 +64,8 @@ def scan_directory(request: ScanRequest) -> Generator:
         if depth > request.max_depth:
             continue
 
-        if count >= max_files:
+        # Verificar límite de archivos solo si está habilitado (max_files > 0)
+        if max_files > 0 and count >= max_files:
             logger.warning(f"Límite de {max_files:,} archivos alcanzado")
             yield {"type": "limit", "count": count}
             return

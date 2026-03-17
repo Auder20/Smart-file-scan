@@ -23,6 +23,7 @@ import com.smartfileorganizer.api.ApiClient;
 import com.smartfileorganizer.models.CategoryStats;
 import com.smartfileorganizer.models.LargeFile;
 import com.smartfileorganizer.utils.FormatUtils;
+import com.smartfileorganizer.utils.UIUtils;
 import okhttp3.*;
 
 public class StatsController implements Initializable {
@@ -362,7 +363,7 @@ public class StatsController implements Initializable {
                 String url = "http://127.0.0.1:8000/api/export/" + scanId + "/stats?format=" + format;
                 okhttp3.Request req = new okhttp3.Request.Builder().url(url).build();
                 try (okhttp3.Response response = new okhttp3.OkHttpClient.Builder()
-                        .readTimeout(120, java.util.concurrent.TimeUnit.SECONDS)
+                        .readTimeout(600, java.util.concurrent.TimeUnit.SECONDS)
                         .build().newCall(req).execute()) {
 
                     if (!response.isSuccessful()) {

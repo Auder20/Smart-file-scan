@@ -184,6 +184,13 @@ def delete_scan(scan_id: str) -> dict:
         _scan_cancel_events[scan_id].set()
         del _scan_cancel_events[scan_id]
     scan_store.remove_scan(scan_id)
+    # También eliminar de SQLite para que no reaparezca al reiniciar
+    try:
+        from app.db.database import delete_scan_data
+        delete_scan_data(scan_id)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"Error borrando scan {scan_id} de SQLite: {e}")
     return {"message": f"Scan {scan_id} eliminado correctamente"}
 
 
