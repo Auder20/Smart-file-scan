@@ -1,143 +1,241 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <?import javafx.scene.layout.*?>
 <?import javafx.scene.control.*?>
+<?import javafx.scene.shape.*?>
 <?import javafx.geometry.Insets?>
 
 <ScrollPane xmlns:fx="http://javafx.com/fxml"
             fx:controller="com.smartfileorganizer.controllers.DashboardController"
             fitToWidth="true" hbarPolicy="NEVER"
-            style="-fx-background: #1E1E1E; -fx-background-color: #1E1E1E; -fx-border-color: transparent;">
+            style="-fx-background: #0D0F12; -fx-background-color: #0D0F12; -fx-border-color: transparent;">
 
-  <VBox spacing="20" style="-fx-padding: 28; -fx-background-color: #1E1E1E;">
+  <VBox spacing="22" style="-fx-padding: 28 32; -fx-background-color: #0D0F12;">
 
     <!-- ── Header ─────────────────────────────────────────────────── -->
-    <HBox spacing="12" alignment="CENTER_LEFT">
-      <VBox spacing="3">
-        <Label text="Dashboard" style="-fx-text-fill: #E8E8E8; -fx-font-size: 22px; -fx-font-weight: bold;"/>
-        <Label text="Resumen del sistema y escaneos recientes"
-               style="-fx-text-fill: #6E6E75; -fx-font-size: 12px;"/>
+    <HBox spacing="14" alignment="CENTER_LEFT">
+      <VBox spacing="4">
+        <HBox spacing="8" alignment="CENTER_LEFT">
+          <Label text="~"
+                 style="-fx-text-fill: #38BDF8; -fx-font-size: 18px; -fx-font-weight: bold;
+                        -fx-font-family: 'JetBrains Mono','Fira Code','Consolas',monospace;"/>
+          <Label text="dashboard"
+                 style="-fx-text-fill: #EDF0F5; -fx-font-size: 20px; -fx-font-weight: bold;
+                        -fx-font-family: 'JetBrains Mono','Fira Code','Consolas',monospace;"/>
+        </HBox>
+        <Label text="system overview and recent scan history"
+               style="-fx-text-fill: #2A2F3A; -fx-font-size: 11px;
+                      -fx-font-family: 'JetBrains Mono','Fira Code','Consolas',monospace;"/>
       </VBox>
       <Region HBox.hgrow="ALWAYS"/>
-      <Button fx:id="btnRefresh" text="↻  Actualizar" styleClass="btn-secondary" onAction="#refreshDashboard"/>
-      <Button fx:id="btnNewScan" text="+ Nuevo Escaneo" styleClass="btn-primary" onAction="#startNewScan"/>
+      <Button fx:id="btnRefresh" text="↻  refresh" styleClass="btn-secondary" onAction="#refreshDashboard"/>
+      <Button fx:id="btnNewScan" text="+  new scan" styleClass="btn-primary" onAction="#startNewScan"/>
     </HBox>
 
     <!-- ── Status strip ───────────────────────────────────────────── -->
-    <HBox spacing="10" alignment="CENTER_LEFT"
-          style="-fx-background-color: #252526; -fx-background-radius: 8; -fx-border-color: #2D2D30; -fx-border-width: 1; -fx-border-radius: 8; -fx-padding: 12 16;">
-      <Label text="Backend:" style="-fx-text-fill: #6E6E75; -fx-font-size: 12px;"/>
-      <Label fx:id="lblBackendStatus" text="● Verificando…"
-             style="-fx-text-fill: #6E6E75; -fx-font-size: 12px; -fx-font-weight: bold;"/>
-      <Region HBox.hgrow="ALWAYS"/>
-      <Label text="Escaneos totales:" style="-fx-text-fill: #6E6E75; -fx-font-size: 12px;"/>
-      <Label fx:id="lblTotalScans" text="—"
-             style="-fx-text-fill: #E8E8E8; -fx-font-size: 12px; -fx-font-weight: bold;"/>
-      <Label text="  |  " style="-fx-text-fill: #3E3E42;"/>
-      <Label text="Archivos analizados:" style="-fx-text-fill: #6E6E75; -fx-font-size: 12px;"/>
-      <Label fx:id="lblTotalAnalyzed" text="—"
-             style="-fx-text-fill: #E8E8E8; -fx-font-size: 12px; -fx-font-weight: bold;"/>
-      <Label text="  |  " style="-fx-text-fill: #3E3E42;"/>
-      <Label text="Último escaneo:" style="-fx-text-fill: #6E6E75; -fx-font-size: 12px;"/>
-      <Label fx:id="lblLastScanTime" text="—"
-             style="-fx-text-fill: #E8E8E8; -fx-font-size: 12px;"/>
+    <HBox spacing="0" alignment="CENTER_LEFT"
+          style="-fx-background-color: #13161B;
+                 -fx-background-radius: 8;
+                 -fx-border-color: #2A2F3A;
+                 -fx-border-width: 1;
+                 -fx-border-radius: 8;
+                 -fx-padding: 0;">
+
+      <!-- Status indicator pill -->
+      <HBox spacing="8" alignment="CENTER_LEFT"
+            style="-fx-padding: 10 18; -fx-border-color: transparent #2A2F3A transparent transparent; -fx-border-width: 0 1 0 0;">
+        <Rectangle width="6" height="6" arcWidth="6" arcHeight="6" fill="#34D399"
+                   style="-fx-effect: dropshadow(gaussian,rgba(52,211,153,0.8),5,0,0,0);"/>
+        <Label fx:id="lblBackendStatus" text="connecting…"
+               style="-fx-text-fill: #4A5268; -fx-font-size: 11px;
+                      -fx-font-family: 'JetBrains Mono','Fira Code','Consolas',monospace;"/>
+      </HBox>
+
+      <HBox spacing="6" alignment="CENTER_LEFT"
+            style="-fx-padding: 10 18; -fx-border-color: transparent #2A2F3A transparent transparent; -fx-border-width: 0 1 0 0;">
+        <Label text="scans"
+               style="-fx-text-fill: #2A2F3A; -fx-font-size: 10px;
+                      -fx-font-family: 'JetBrains Mono','Fira Code','Consolas',monospace;"/>
+        <Label fx:id="lblTotalScans" text="—"
+               style="-fx-text-fill: #38BDF8; -fx-font-size: 12px; -fx-font-weight: bold;
+                      -fx-font-family: 'JetBrains Mono','Fira Code','Consolas',monospace;"/>
+      </HBox>
+
+      <HBox spacing="6" alignment="CENTER_LEFT"
+            style="-fx-padding: 10 18; -fx-border-color: transparent #2A2F3A transparent transparent; -fx-border-width: 0 1 0 0;">
+        <Label text="files"
+               style="-fx-text-fill: #2A2F3A; -fx-font-size: 10px;
+                      -fx-font-family: 'JetBrains Mono','Fira Code','Consolas',monospace;"/>
+        <Label fx:id="lblTotalAnalyzed" text="—"
+               style="-fx-text-fill: #34D399; -fx-font-size: 12px; -fx-font-weight: bold;
+                      -fx-font-family: 'JetBrains Mono','Fira Code','Consolas',monospace;"/>
+      </HBox>
+
+      <HBox spacing="6" alignment="CENTER_LEFT" style="-fx-padding: 10 18;">
+        <Label text="last scan"
+               style="-fx-text-fill: #2A2F3A; -fx-font-size: 10px;
+                      -fx-font-family: 'JetBrains Mono','Fira Code','Consolas',monospace;"/>
+        <Label fx:id="lblLastScanTime" text="—"
+               style="-fx-text-fill: #8A94A8; -fx-font-size: 11px;
+                      -fx-font-family: 'JetBrains Mono','Fira Code','Consolas',monospace;"/>
+      </HBox>
     </HBox>
 
     <!-- ── Stat cards ─────────────────────────────────────────────── -->
     <HBox spacing="12">
-      <!-- Total space -->
-      <VBox spacing="6" HBox.hgrow="ALWAYS" styleClass="stat-card" style="-fx-border-color: #1A3A5C;">
-        <Label text="ESPACIO ANALIZADO" style="-fx-text-fill: #3E6A9E; -fx-font-size: 10px; -fx-font-weight: bold;"/>
-        <Label fx:id="lblTotalSpace" text="—" style="-fx-text-fill: #4B9EFF; -fx-font-size: 24px; -fx-font-weight: bold;"/>
-        <Label text="en escaneos completados" style="-fx-text-fill: #4A4A50; -fx-font-size: 11px;"/>
+      <!-- Space analyzed -->
+      <VBox spacing="8" HBox.hgrow="ALWAYS"
+            style="-fx-background-color: #181B21; -fx-background-radius: 8;
+                   -fx-border-color: #0E3854; -fx-border-width: 1; -fx-border-radius: 8;
+                   -fx-padding: 18 20;
+                   -fx-effect: dropshadow(gaussian,rgba(0,0,0,0.4),8,0,0,2);">
+        <Label text="// analyzed"
+               style="-fx-text-fill: #0E3854; -fx-font-size: 10px; -fx-font-weight: bold;
+                      -fx-font-family: 'JetBrains Mono','Fira Code','Consolas',monospace;"/>
+        <Label fx:id="lblTotalSpace" text="—"
+               style="-fx-text-fill: #38BDF8; -fx-font-size: 24px; -fx-font-weight: bold;
+                      -fx-font-family: 'JetBrains Mono','Fira Code','Consolas',monospace;"/>
+        <Label text="total space"
+               style="-fx-text-fill: #2A2F3A; -fx-font-size: 10px;
+                      -fx-font-family: 'JetBrains Mono','Fira Code','Consolas',monospace;"/>
       </VBox>
+
       <!-- Duplicate space -->
-      <VBox spacing="6" HBox.hgrow="ALWAYS" styleClass="stat-card" style="-fx-border-color: #3A1A1A;">
-        <Label text="ESPACIO DUPLICADO" style="-fx-text-fill: #9E3A3A; -fx-font-size: 10px; -fx-font-weight: bold;"/>
-        <Label fx:id="lblDuplicateSpace" text="—" style="-fx-text-fill: #E05555; -fx-font-size: 24px; -fx-font-weight: bold;"/>
-        <Label fx:id="lblSpaceUsage" text="Analiza duplicados para ver datos"
-               style="-fx-text-fill: #4A4A50; -fx-font-size: 11px; -fx-wrap-text: true;"/>
+      <VBox spacing="8" HBox.hgrow="ALWAYS"
+            style="-fx-background-color: #181B21; -fx-background-radius: 8;
+                   -fx-border-color: #3A0F1A; -fx-border-width: 1; -fx-border-radius: 8;
+                   -fx-padding: 18 20;
+                   -fx-effect: dropshadow(gaussian,rgba(0,0,0,0.4),8,0,0,2);">
+        <Label text="// wasted"
+               style="-fx-text-fill: #3A0F1A; -fx-font-size: 10px; -fx-font-weight: bold;
+                      -fx-font-family: 'JetBrains Mono','Fira Code','Consolas',monospace;"/>
+        <Label fx:id="lblDuplicateSpace" text="—"
+               style="-fx-text-fill: #FB7185; -fx-font-size: 24px; -fx-font-weight: bold;
+                      -fx-font-family: 'JetBrains Mono','Fira Code','Consolas',monospace;"/>
+        <Label fx:id="lblSpaceUsage" text="run duplicate scan"
+               style="-fx-text-fill: #2A2F3A; -fx-font-size: 10px; -fx-wrap-text: true;
+                      -fx-font-family: 'JetBrains Mono','Fira Code','Consolas',monospace;"/>
       </VBox>
-      <!-- Progress bar for usage -->
-      <VBox spacing="6" HBox.hgrow="ALWAYS" styleClass="stat-card">
-        <Label text="USO DE ESPACIO" style="-fx-text-fill: #4A4A50; -fx-font-size: 10px; -fx-font-weight: bold;"/>
+
+      <!-- Usage bar -->
+      <VBox spacing="10" HBox.hgrow="ALWAYS"
+            style="-fx-background-color: #181B21; -fx-background-radius: 8;
+                   -fx-border-color: #2A2F3A; -fx-border-width: 1; -fx-border-radius: 8;
+                   -fx-padding: 18 20;
+                   -fx-effect: dropshadow(gaussian,rgba(0,0,0,0.4),8,0,0,2);">
+        <Label text="// usage"
+               style="-fx-text-fill: #2A2F3A; -fx-font-size: 10px; -fx-font-weight: bold;
+                      -fx-font-family: 'JetBrains Mono','Fira Code','Consolas',monospace;"/>
         <ProgressBar fx:id="spaceUsageBar" progress="0" maxWidth="Infinity"
-                     style="-fx-pref-height: 6px;"/>
-        <Label text="Duplicados vs. total analizado"
-               style="-fx-text-fill: #4A4A50; -fx-font-size: 11px;"/>
+                     style="-fx-pref-height: 4px;"/>
+        <Label text="duplicate ratio"
+               style="-fx-text-fill: #2A2F3A; -fx-font-size: 10px;
+                      -fx-font-family: 'JetBrains Mono','Fira Code','Consolas',monospace;"/>
       </VBox>
     </HBox>
 
     <!-- ── Recent scans ───────────────────────────────────────────── -->
     <VBox spacing="10">
-      <HBox alignment="CENTER_LEFT" spacing="12">
-        <Label text="ESCANEOS RECIENTES"
-               style="-fx-text-fill: #4A4A50; -fx-font-size: 10px; -fx-font-weight: bold;"/>
-        <Region HBox.hgrow="ALWAYS"/>
-        <Button text="Ver todos →" styleClass="btn-icon" onAction="#viewAllScans"/>
+      <HBox alignment="CENTER_LEFT" spacing="10">
+        <Label text="// recent_scans"
+               style="-fx-text-fill: #2A2F3A; -fx-font-size: 10px; -fx-font-weight: bold;
+                      -fx-font-family: 'JetBrains Mono','Fira Code','Consolas',monospace;"/>
+        <Region HBox.hgrow="ALWAYS"
+                style="-fx-border-color: #1E2129 transparent transparent transparent; -fx-border-width: 1 0 0 0;"/>
+        <Button text="see all →" styleClass="btn-icon" onAction="#viewAllScans"/>
       </HBox>
 
-      <TableView fx:id="tableRecentScans" prefHeight="220" styleClass="data-table">
+      <TableView fx:id="tableRecentScans" prefHeight="210" styleClass="data-table">
         <columns>
           <TableColumn fx:id="colRecentScanId"  text="ID"       prefWidth="80"  minWidth="60"/>
-          <TableColumn fx:id="colRecentPath"    text="Ruta"     prefWidth="320" minWidth="200"/>
-          <TableColumn fx:id="colRecentStatus"  text="Estado"   prefWidth="110" minWidth="90"/>
-          <TableColumn fx:id="colRecentFiles"   text="Archivos" prefWidth="90"  minWidth="70"/>
-          <TableColumn fx:id="colRecentSize"    text="Tamaño"   prefWidth="100" minWidth="80"/>
-          <TableColumn fx:id="colRecentDate"    text="Fecha"    prefWidth="150" minWidth="100"/>
+          <TableColumn fx:id="colRecentPath"    text="PATH"     prefWidth="340" minWidth="200"/>
+          <TableColumn fx:id="colRecentStatus"  text="STATUS"   prefWidth="110" minWidth="90"/>
+          <TableColumn fx:id="colRecentFiles"   text="FILES"    prefWidth="80"  minWidth="60"/>
+          <TableColumn fx:id="colRecentSize"    text="SIZE"     prefWidth="100" minWidth="80"/>
+          <TableColumn fx:id="colRecentDate"    text="DATE"     prefWidth="150" minWidth="100"/>
         </columns>
         <placeholder>
-          <Label text="No hay escaneos todavía. Inicia uno desde Escanear."
-                 style="-fx-text-fill: #4A4A50; -fx-font-size: 12px;"/>
+          <VBox alignment="CENTER" spacing="8" style="-fx-padding: 32;">
+            <Label text="[ ]" style="-fx-text-fill: #1E2129; -fx-font-size: 28px;
+                                     -fx-font-family: 'JetBrains Mono','Fira Code','Consolas',monospace;"/>
+            <Label text="no scans yet — start one from scan view"
+                   style="-fx-text-fill: #2A2F3A; -fx-font-size: 11px;
+                          -fx-font-family: 'JetBrains Mono','Fira Code','Consolas',monospace;"/>
+          </VBox>
         </placeholder>
       </TableView>
     </VBox>
 
     <!-- ── Bottom row ─────────────────────────────────────────────── -->
-    <HBox spacing="12">
+    <HBox spacing="14">
 
       <!-- Quick actions -->
       <VBox spacing="8" prefWidth="260">
-        <Label text="ACCIONES RÁPIDAS"
-               style="-fx-text-fill: #4A4A50; -fx-font-size: 10px; -fx-font-weight: bold;"/>
-        <VBox spacing="8" styleClass="card-flat">
-          <Button text="🔍  Escanear carpeta" styleClass="btn-secondary" maxWidth="Infinity" onAction="#quickScan"/>
-          <Button text="📁  Ver duplicados"   styleClass="btn-secondary" maxWidth="Infinity" onAction="#findDuplicates"/>
-          <Button text="📈  Ver estadísticas" styleClass="btn-secondary" maxWidth="Infinity" onAction="#viewStats"/>
-          <Button text="🧹  Limpiar duplicados" styleClass="btn-danger" maxWidth="Infinity" onAction="#quickCleanup"/>
+        <Label text="// actions"
+               style="-fx-text-fill: #2A2F3A; -fx-font-size: 10px; -fx-font-weight: bold;
+                      -fx-font-family: 'JetBrains Mono','Fira Code','Consolas',monospace;"/>
+        <VBox spacing="6"
+              style="-fx-background-color: #181B21; -fx-background-radius: 8;
+                     -fx-border-color: #2A2F3A; -fx-border-width: 1; -fx-border-radius: 8;
+                     -fx-padding: 14;">
+          <Button text="▸  scan folder"       styleClass="btn-secondary" maxWidth="Infinity" onAction="#quickScan"/>
+          <Button text="▸  find duplicates"   styleClass="btn-secondary" maxWidth="Infinity" onAction="#findDuplicates"/>
+          <Button text="▸  view stats"        styleClass="btn-secondary" maxWidth="Infinity" onAction="#viewStats"/>
+          <Button text="▸  clean duplicates"  styleClass="btn-danger"    maxWidth="Infinity" onAction="#quickCleanup"/>
         </VBox>
       </VBox>
 
       <!-- Status summary -->
       <VBox spacing="8" HBox.hgrow="ALWAYS">
-        <Label text="RESUMEN DE ESTADO"
-               style="-fx-text-fill: #4A4A50; -fx-font-size: 10px; -fx-font-weight: bold;"/>
-        <ListView fx:id="listTopCategories" prefHeight="160" styleClass="list-view"/>
+        <Label text="// scan_status"
+               style="-fx-text-fill: #2A2F3A; -fx-font-size: 10px; -fx-font-weight: bold;
+                      -fx-font-family: 'JetBrains Mono','Fira Code','Consolas',monospace;"/>
+        <ListView fx:id="listTopCategories" prefHeight="158"/>
       </VBox>
 
     </HBox>
 
     <!-- ── Recommendations ────────────────────────────────────────── -->
     <VBox spacing="8">
-      <Label text="RECOMENDACIONES"
-             style="-fx-text-fill: #4A4A50; -fx-font-size: 10px; -fx-font-weight: bold;"/>
-      <VBox spacing="6" styleClass="card-flat">
-        <Label fx:id="lblRecommendation1" text="—"
-               style="-fx-text-fill: #9A9A9F; -fx-font-size: 12px; -fx-wrap-text: true;"/>
-        <Separator style="-fx-opacity: 0.3;"/>
-        <Label fx:id="lblRecommendation2" text="—"
-               style="-fx-text-fill: #9A9A9F; -fx-font-size: 12px; -fx-wrap-text: true;"/>
-        <Separator style="-fx-opacity: 0.3;"/>
-        <Label fx:id="lblRecommendation3" text="—"
-               style="-fx-text-fill: #9A9A9F; -fx-font-size: 12px; -fx-wrap-text: true;"/>
+      <Label text="// recommendations"
+             style="-fx-text-fill: #2A2F3A; -fx-font-size: 10px; -fx-font-weight: bold;
+                    -fx-font-family: 'JetBrains Mono','Fira Code','Consolas',monospace;"/>
+      <VBox spacing="0"
+            style="-fx-background-color: #181B21; -fx-background-radius: 8;
+                   -fx-border-color: #2A2F3A; -fx-border-width: 1; -fx-border-radius: 8;">
+        <HBox style="-fx-padding: 12 16;">
+          <Label fx:id="lblRecommendation1" text="—"
+                 style="-fx-text-fill: #4A5268; -fx-font-size: 11px; -fx-wrap-text: true;
+                        -fx-font-family: 'JetBrains Mono','Fira Code','Consolas',monospace;"
+                 HBox.hgrow="ALWAYS"/>
+        </HBox>
+        <Pane prefHeight="1" maxHeight="1" maxWidth="Infinity"
+      style="-fx-background-color: #1E2129;"/>
+        <HBox style="-fx-padding: 12 16;">
+          <Label fx:id="lblRecommendation2" text="—"
+                 style="-fx-text-fill: #4A5268; -fx-font-size: 11px; -fx-wrap-text: true;
+                        -fx-font-family: 'JetBrains Mono','Fira Code','Consolas',monospace;"
+                 HBox.hgrow="ALWAYS"/>
+        </HBox>
+        <Pane prefHeight="1" maxHeight="1" maxWidth="Infinity"
+      style="-fx-background-color: #1E2129;" HBox.hgrow="ALWAYS"/>
+        <HBox style="-fx-padding: 12 16;">
+          <Label fx:id="lblRecommendation3" text="—"
+                 style="-fx-text-fill: #4A5268; -fx-font-size: 11px; -fx-wrap-text: true;
+                        -fx-font-family: 'JetBrains Mono','Fira Code','Consolas',monospace;"
+                 HBox.hgrow="ALWAYS"/>
+        </HBox>
       </VBox>
     </VBox>
 
     <!-- ── Progress ───────────────────────────────────────────────── -->
     <VBox fx:id="progressSection" spacing="8" visible="false" managed="false"
-          style="-fx-background-color: #252526; -fx-background-radius: 8; -fx-border-color: #2D2D30; -fx-border-width: 1; -fx-border-radius: 8; -fx-padding: 16;">
-      <Label fx:id="lblProgress" text="Actualizando…"
-             style="-fx-text-fill: #9A9A9F; -fx-font-size: 12px;"/>
-      <ProgressBar fx:id="progressBar" prefWidth="Infinity" progress="-1"/>
+          style="-fx-background-color: #13161B; -fx-background-radius: 8;
+                 -fx-border-color: #0E3854; -fx-border-width: 1; -fx-border-radius: 8;
+                 -fx-padding: 14 18;">
+      <Label fx:id="lblProgress" text="updating…"
+             style="-fx-text-fill: #38BDF8; -fx-font-size: 11px;
+                    -fx-font-family: 'JetBrains Mono','Fira Code','Consolas',monospace;"/>
+      <ProgressBar fx:id="progressBar" maxWidth="Infinity" progress="-1" VBox.vgrow="NEVER"/>
     </VBox>
 
   </VBox>

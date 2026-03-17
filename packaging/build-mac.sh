@@ -141,6 +141,7 @@ pyinstaller --onefile \
     --hidden-import=uvicorn.lifespan \
     --hidden-import=uvicorn.lifespan.on \
     --hidden-import=anyio._backends._asyncio \
+    --hidden-import=anyio._backends._trio \
     --collect-all fastapi \
     --collect-all pydantic \
     --target-arch "$ARCH" \
@@ -173,7 +174,6 @@ JPACKAGE_ARGS=(
     --main-class "$MAIN_CLASS"
     --java-options "--enable-preview"
     --java-options "-Xmx512m"
-    --java-options "--add-opens=javafx.graphics/com.sun.javafx.application=ALL-UNNAMED"
     --mac-package-identifier "$BUNDLE_ID"
     --mac-package-name "$APP_DISPLAY_NAME"
 )
@@ -268,9 +268,13 @@ DMG_OUTPUT="$INSTALLER_DIR/${APP_NAME}-${APP_VERSION}.dmg"
 
 if [[ "$USE_CREATE_DMG" == true ]]; then
     # DMG con fondo personalizado y layout tipo "arrastra a Applications"
+    VOLICON=""
+    if [ -f "$APP_BUNDLE/Contents/Resources/$APP_NAME.icns" ]; then
+        VOLICON="--volicon \"$APP_BUNDLE/Contents/Resources/$APP_NAME.icns\""
+    fi
     create-dmg \
         --volname "$APP_DISPLAY_NAME" \
-        --volicon "$APP_BUNDLE/Contents/Resources/$APP_NAME.icns" \
+        $VOLICON \
         --window-pos 200 120 \
         --window-size 600 400 \
         --icon-size 128 \

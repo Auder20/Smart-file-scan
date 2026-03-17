@@ -58,10 +58,8 @@ ok "jpackage encontrado"
 
 # Python
 command -v python3 >/dev/null 2>&1 || error "Python3 no encontrado.\n  Ubuntu: sudo apt install python3.11 python3.11-venv\n  Fedora: sudo dnf install python3.11"
-PY_MINOR=$(python3 -c "import sys; print(sys.version_info.minor)")
-PY_MAJOR=$(python3 -c "import sys; print(sys.version_info.major)")
-[[ "$PY_MAJOR" -ge 3 && "$PY_MINOR" -ge 11 ]] || error "Necesitas Python 3.11+. Tienes Python $PY_MAJOR.$PY_MINOR."
-ok "Python $PY_MAJOR.$PY_MINOR encontrado"
+PY_VER=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+ok "Python $PY_VER encontrado"
 
 # Maven
 command -v mvn >/dev/null 2>&1 || error "Maven no encontrado.\n  Ubuntu: sudo apt install maven\n  Fedora: sudo dnf install maven"
@@ -120,6 +118,7 @@ pyinstaller --onefile \
     --hidden-import=uvicorn.lifespan \
     --hidden-import=uvicorn.lifespan.on \
     --hidden-import=anyio._backends._asyncio \
+    --hidden-import=anyio._backends._trio \
     --collect-all fastapi \
     --collect-all pydantic \
     --noconfirm \
@@ -153,7 +152,6 @@ jpackage \
     --main-class "$MAIN_CLASS" \
     --java-options "--enable-preview" \
     --java-options "-Xmx512m" \
-    --java-options "--add-opens=javafx.graphics/com.sun.javafx.application=ALL-UNNAMED"
 
 ok "Frontend empaquetado: $FRONTEND_DIST/$APP_NAME"
 
