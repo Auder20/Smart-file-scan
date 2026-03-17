@@ -11,6 +11,7 @@ from app.api.routes_duplicates import router as duplicates_router
 from app.api.routes_stats      import router as stats_router
 from app.api.routes_files      import router as files_router
 from app.api.routes_explorer   import router as explorer_router
+from app.api.routes_export     import router as export_router
 
 # PRIORIDAD 6: nivel de log configurable desde variable de entorno
 _log_level = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -134,6 +135,7 @@ app.include_router(duplicates_router)
 app.include_router(stats_router)
 app.include_router(files_router)
 app.include_router(explorer_router)
+app.include_router(export_router)
 
 
 @app.get("/api/health", tags=["system"])

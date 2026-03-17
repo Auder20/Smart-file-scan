@@ -217,30 +217,12 @@ public class FilesViewController implements Initializable {
 
     @FXML
     private void exportCsv() {
-        try {
-            FileChooser fc = new FileChooser();
-            fc.setTitle("Exportar archivos a CSV");
-            fc.getExtensionFilters().add(new FileChooser.ExtensionFilter("CSV Files", "*.csv"));
-            fc.setInitialFileName("scan_files_" + scanId + ".csv");
-            java.io.File selected = fc.showSaveDialog(new Stage());
-            if (selected == null) return;
-
-            try (BufferedWriter w = Files.newBufferedWriter(selected.toPath())) {
-                w.write("name,path,size,extension,category,modified\n");
-                for (FileEntry f : allFiles) {
-                    w.write(String.format("%s,%s,%d,%s,%s,%s%n",
-                        csv(f.getName()), csv(f.getPath()), f.getSize(),
-                        csv(f.getExtension()), csv(f.getCategory()), csv(f.getModified())));
-                }
-            }
-            showAlert("Éxito", "Archivo CSV exportado correctamente en:\n" + selected.getPath());
-        } catch (Exception e) {
-            showAlert("Error", "No se pudo exportar a CSV: " + e.getMessage());
-        }
+        exportViaBackend("csv", ".csv");
     }
 
     @FXML
     private void exportJson() {
+        // JSON se mantiene local (no requiere backend)
         try {
             FileChooser fc = new FileChooser();
             fc.setTitle("Exportar archivos a JSON");
@@ -271,6 +253,52 @@ public class FilesViewController implements Initializable {
         } catch (Exception e) {
             showAlert("Error", "No se pudo exportar a JSON: " + e.getMessage());
         }
+    }
+
+    private void exportViaBackend(String format, String ext) {
+        FileChooser fc = new FileChooser();
+        fc.setTitle("Guardar reporte como...");
+        fc.setInitialFileName("scan_files_" + scanId + ext);
+        switch (format) {
+            case "pdf"   -> fc.getExtensionFilters().add(
+                new FileChooser.ExtensionFilter("PDF (*.pdf)", "*.pdf"));
+            case "excel" -> fc.getExtensionFilters().add(
+                new FileChooser.ExtensionFilter("Excel (*.xlsx)", "*.xlsx"));
+            default      -> fc.getExtensionFilters().add(
+                new FileChooser.ExtensionFilter("CSV (*.csv)", "*.csv"));
+        }
+        java.io.File selected = fc.showSaveDialog(new Stage());
+        if (selected == null) return;
+
+        new Thread(() -> {
+            try {
+                String url = "http://127.0.0.1:8000/api/export/" + scanId + "?format=" + format;
+                okhttp3.Request req = new okhttp3.Request.Builder().url(url).build();
+                try (okhttp3.Response response = new okhttp3.OkHttpClient.Builder()
+                        .readTimeout(120, java.util.concurrent.TimeUnit.SECONDS)
+                        .build().newCall(req).execute()) {
+                    if (!response.isSuccessful())
+                        throw new RuntimeException("Error " + response.code());
+                    java.nio.file.Files.write(selected.toPath(), response.body().bytes());
+                }
+                javafx.application.Platform.runLater(() ->
+                    showAlert("Éxito", "Reporte guardado en:\n" + selected.getPath()));
+            } catch (Exception e) {
+                javafx.application.Platform.runLater(() ->
+                    showAlert("Error", "No se pudo exportar: " + e.getMessage() +
+                        "\nAsegúrate de tener instalado: pip install reportlab openpyxl"));
+            }
+        }, "ExportThread").start();
+    }
+
+    @FXML
+    private void exportPdf() {
+        exportViaBackend("pdf", ".pdf");
+    }
+
+    @FXML
+    private void exportExcel() {
+        exportViaBackend("excel", ".xlsx");
     }
 
     @FXML

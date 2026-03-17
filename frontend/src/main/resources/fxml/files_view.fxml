@@ -103,6 +103,8 @@
             style="-fx-background-color: #2D2D30; -fx-text-fill: #9A9A9F;
                    -fx-background-radius: 6; -fx-border-radius: 6;
                    -fx-border-color: #3E3E42; -fx-border-width: 1; -fx-padding: 6 14;"/>
+            <Button text="📄  Exportar PDF"   styleClass="btn-secondary" onAction="#exportPdf"/>
+            <Button text="📊  Exportar Excel" styleClass="btn-secondary" onAction="#exportExcel"/>
     <Button text="Cerrar" onAction="#close"
             style="-fx-background-color: #4B9EFF; -fx-text-fill: #0D1117;
                    -fx-font-weight: bold; -fx-background-radius: 6;

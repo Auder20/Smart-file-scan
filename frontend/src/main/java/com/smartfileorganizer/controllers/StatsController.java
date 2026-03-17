@@ -23,6 +23,7 @@ import com.smartfileorganizer.api.ApiClient;
 import com.smartfileorganizer.models.CategoryStats;
 import com.smartfileorganizer.models.LargeFile;
 import com.smartfileorganizer.utils.FormatUtils;
+import okhttp3.*;
 
 public class StatsController implements Initializable {
 
@@ -318,46 +319,118 @@ public class StatsController implements Initializable {
         String scanId = comboScanId.getSelectionModel().getSelectedItem();
         if (scanId == null) { showAlert("Info", "Selecciona un escaneo primero."); return; }
 
-        // FEAT 2: Show export format selection dialog
-        ChoiceDialog<String> formatDialog = new ChoiceDialog<>("CSV", "CSV", "JSON", "TXT");
+        ChoiceDialog<String> formatDialog = new ChoiceDialog<>(
+            "PDF", "PDF", "Excel (.xlsx)", "CSV", "JSON", "TXT");
         formatDialog.setTitle("Exportar Estadísticas");
-        formatDialog.setHeaderText("Selecciona el formato de exportación:");
+        formatDialog.setHeaderText("Selecciona el formato de exportación");
         formatDialog.setContentText("Formato:");
 
         Optional<String> result = formatDialog.showAndWait();
-        if (result.isPresent()) {
-            String format = result.get();
-            exportStats(scanId, format);
+        if (result.isEmpty()) return;
+
+        String chosen = result.get();
+        switch (chosen) {
+            case "PDF"         -> exportViaBackend(scanId, "pdf",   ".pdf");
+            case "Excel (.xlsx)" -> exportViaBackend(scanId, "excel", ".xlsx");
+            default            -> exportStats(scanId, chosen);
         }
     }
+
+    // ── Exportación via backend (PDF / Excel) ─────────────────────────────────
+
+    private void exportViaBackend(String scanId, String format, String ext) {
+        javafx.stage.FileChooser fc = new javafx.stage.FileChooser();
+        fc.setTitle("Guardar reporte como...");
+        fc.setInitialFileName("estadisticas_" + scanId + ext);
+        switch (format) {
+            case "pdf"   -> fc.getExtensionFilters().add(
+                new javafx.stage.FileChooser.ExtensionFilter("PDF (*.pdf)", "*.pdf"));
+            case "excel" -> fc.getExtensionFilters().add(
+                new javafx.stage.FileChooser.ExtensionFilter("Excel (*.xlsx)", "*.xlsx"));
+        }
+
+        // Obtener el stage desde cualquier nodo del scene
+        javafx.stage.Stage stage = (javafx.stage.Stage) btnExport.getScene().getWindow();
+        java.io.File file = fc.showSaveDialog(stage);
+        if (file == null) return;
+
+        showProgress(true, "Generando reporte " + format.toUpperCase() + "...");
+
+        final java.io.File finalFile = file;
+        CompletableFuture.runAsync(() -> {
+            try {
+                String url = "http://127.0.0.1:8000/api/export/" + scanId + "/stats?format=" + format;
+                okhttp3.Request req = new okhttp3.Request.Builder().url(url).build();
+                try (okhttp3.Response response = new okhttp3.OkHttpClient.Builder()
+                        .readTimeout(120, java.util.concurrent.TimeUnit.SECONDS)
+                        .build().newCall(req).execute()) {
+
+                    if (!response.isSuccessful()) {
+                        String body = response.body() != null ? response.body().string() : "";
+                        throw new RuntimeException("Error " + response.code() + ": " + body);
+                    }
+                    java.nio.file.Files.write(finalFile.toPath(), response.body().bytes());
+                }
+
+                Platform.runLater(() -> {
+                    showProgress(false, "");
+                    showAlert("Exportación completada",
+                        "Reporte guardado en:\n" + finalFile.getAbsolutePath());
+                });
+            } catch (Exception e) {
+                Platform.runLater(() -> {
+                    showProgress(false, "");
+                    showAlert("Error al exportar",
+                        e.getMessage() + "\n\nAsegúrate de que el backend tiene instalado:\n" +
+                        "  pip install reportlab openpyxl");
+                });
+            }
+        });
+    }
+
+    // ── Exportación local (CSV / JSON / TXT) ──────────────────────────────────
 
     private void exportStats(String scanId, String format) {
         showProgress(true, "Preparando exportación " + format + "...");
 
         CompletableFuture.runAsync(() -> {
             try {
-                java.nio.file.Path outFile = null;
-                
-                switch (format.toUpperCase()) {
-                    case "CSV":
-                        outFile = exportToCsv(scanId);
-                        break;
-                    case "JSON":
-                        outFile = exportToJson(scanId);
-                        break;
-                    case "TXT":
-                    default:
-                        outFile = exportToText(scanId);
-                        break;
+                // Elegir archivo destino
+                javafx.stage.FileChooser fc = new javafx.stage.FileChooser();
+                fc.setTitle("Guardar como...");
+                String ext = format.equalsIgnoreCase("JSON") ? ".json"
+                           : format.equalsIgnoreCase("TXT")  ? ".txt" : ".csv";
+                fc.setInitialFileName("estadisticas_" + scanId + ext);
+                fc.getExtensionFilters().add(new javafx.stage.FileChooser.ExtensionFilter(
+                    format + " (*" + ext + ")", "*" + ext));
+
+                javafx.stage.Stage stage = (javafx.stage.Stage) btnExport.getScene().getWindow();
+                final java.io.File[] chosen = {null};
+                // showSaveDialog debe correr en JavaFX thread
+                java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+                Platform.runLater(() -> {
+                    chosen[0] = fc.showSaveDialog(stage);
+                    latch.countDown();
+                });
+                latch.await();
+                if (chosen[0] == null) {
+                    Platform.runLater(() -> showProgress(false, ""));
+                    return;
                 }
 
-                final java.nio.file.Path finalOutFile = outFile;
+                java.nio.file.Path outFile = null;
+                switch (format.toUpperCase()) {
+                    case "CSV"  -> outFile = exportToCsv(scanId,  chosen[0].toPath());
+                    case "JSON" -> outFile = exportToJson(scanId, chosen[0].toPath());
+                    default     -> outFile = exportToText(scanId, chosen[0].toPath());
+                }
+
+                final java.nio.file.Path finalOut = outFile;
                 Platform.runLater(() -> {
                     showProgress(false, "");
-                    showAlert("Exportación completada", 
-                        "Archivo guardado en:\n" + finalOutFile.toString());
+                    showAlert("Exportación completada",
+                        "Archivo guardado en:\n" + finalOut.toString());
                 });
-
             } catch (Exception e) {
                 Platform.runLater(() -> {
                     showProgress(false, "");
@@ -367,9 +440,8 @@ public class StatsController implements Initializable {
         });
     }
 
-    private java.nio.file.Path exportToCsv(String scanId) throws Exception {
-        java.nio.file.Path outFile = java.nio.file.Files.createTempFile(
-            "sfo_stats_" + scanId + "_", ".csv");
+    private java.nio.file.Path exportToCsv(String scanId, java.nio.file.Path outFile) throws Exception {
+        if (outFile == null) outFile = java.nio.file.Files.createTempFile("sfo_stats_" + scanId + "_", ".csv");
         
         try (java.io.BufferedWriter writer = java.nio.file.Files.newBufferedWriter(outFile)) {
             // CSV Header
@@ -401,9 +473,8 @@ public class StatsController implements Initializable {
         return outFile;
     }
 
-    private java.nio.file.Path exportToJson(String scanId) throws Exception {
-        java.nio.file.Path outFile = java.nio.file.Files.createTempFile(
-            "sfo_stats_" + scanId + "_", ".json");
+    private java.nio.file.Path exportToJson(String scanId, java.nio.file.Path outFile) throws Exception {
+        if (outFile == null) outFile = java.nio.file.Files.createTempFile("sfo_stats_" + scanId + "_", ".json");
         
         JsonObject root = new JsonObject();
         root.addProperty("scan_id", scanId);
@@ -459,7 +530,7 @@ public class StatsController implements Initializable {
         return outFile;
     }
 
-    private java.nio.file.Path exportToText(String scanId) throws Exception {
+    private java.nio.file.Path exportToText(String scanId, java.nio.file.Path outFile) throws Exception {
         StringBuilder sb = new StringBuilder();
         sb.append("Smart File Organizer — Estadísticas\n");
         sb.append("Escaneo: ").append(scanId).append("\n");
@@ -488,10 +559,9 @@ public class StatsController implements Initializable {
         sb.append("\nEXTENSIONES:\n");
         for (String ext : extensionsList) sb.append("  ").append(ext).append("\n");
 
-        java.nio.file.Path out = java.nio.file.Files.createTempFile(
-            "sfo_stats_" + scanId + "_", ".txt");
-        java.nio.file.Files.writeString(out, sb.toString());
-        return out;
+        if (outFile == null) outFile = java.nio.file.Files.createTempFile("sfo_stats_" + scanId + "_", ".txt");
+        java.nio.file.Files.writeString(outFile, sb.toString());
+        return outFile;
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

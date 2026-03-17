@@ -1,16 +1,20 @@
 # Smart File Organizer — Backend dependencies
 # Fija versiones mínimas para reproducibilidad.
 # Actualizar con: pip install --upgrade -r requirements.txt
-
+ 
 fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
 pydantic>=2.5.0
 sqlalchemy>=2.0.0
-
+ 
 # FIX: send2trash se usaba en routes_duplicates pero no estaba declarado
 send2trash>=1.8.2
-
+ 
 httpx>=0.25.0
 pytest>=7.4.0
 websockets>=12.0
 psutil>=5.9.0
+# Exportación
+openpyxl>=3.1.0
+reportlab>=4.0.0
+ 
