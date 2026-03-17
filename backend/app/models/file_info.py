@@ -45,15 +45,17 @@ class ScanRequest(BaseModel):
 
     @field_validator("path")
     @classmethod
-    def path_must_exist(cls, v: str) -> str:
-        # FIX: usar normalize_scan_path en vez de _resolve_path_for_docker
-        # para que funcione tanto con rutas nativas (D:\...) como con rutas
-        # ya en formato Docker (/host/d/...) que llegan del explorador.
-        from app.core.path_utils import normalize_scan_path
-        resolved = normalize_scan_path(v)
-        if not os.path.isdir(resolved):
-            raise ValueError(f"El directorio no existe: {resolved} (ruta original: {v})")
-        return v
+    def path_must_not_be_empty(cls, v: str) -> str:
+        # NO validar existencia aquí. Este validator corre al deserializar
+        # el JSON del request, ANTES de que el scanner resuelva la ruta con
+        # normalize_scan_path(). Si validamos existencia aquí:
+        #   - En modo Docker: la ruta nativa del host (C:\Users) no existe
+        #     dentro del contenedor → siempre falla aunque sea válida.
+        #   - En modo local en Windows: backslashes pueden causar falsos negativos.
+        # La validación real ocurre en scan_directory() y resolve_and_validate().
+        if not v or not v.strip():
+            raise ValueError("La ruta no puede estar vacía")
+        return v.strip()
 
 
 class ScanStatus(str, Enum):

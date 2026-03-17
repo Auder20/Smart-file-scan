@@ -298,8 +298,10 @@ def explore_folders(
 
 @router.get("/validate-path")
 def validate_scan_path(path: str = Query(...)) -> dict:
-    normalized = os.path.realpath(path)
-    resolved = resolve_path_for_docker(normalized)
+    # Usar normalize_scan_path en vez de realpath + resolve_path_for_docker
+    # para manejar correctamente rutas nativas del host en modo Docker
+    from app.core.path_utils import normalize_scan_path
+    resolved = normalize_scan_path(path)
 
     if is_blocked_path(resolved):
         return {"valid": False, "reason": "Ruta del sistema bloqueada", "suggestion": "Selecciona carpetas de usuario"}

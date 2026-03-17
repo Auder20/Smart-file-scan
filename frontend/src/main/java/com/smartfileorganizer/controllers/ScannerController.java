@@ -31,6 +31,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 import com.smartfileorganizer.api.ApiClient;
 import com.smartfileorganizer.models.ScanInfo;
@@ -77,6 +81,11 @@ public class ScannerController implements Initializable {
     private final ObservableList<ScanInfo> scanList = FXCollections.observableArrayList();
 
     private volatile boolean isScanning    = false;
+    private ScheduledFuture<?> pollFallback = null;
+    private static final ScheduledExecutorService POLL_EXECUTOR =
+        Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "ScanPoll"); t.setDaemon(true); return t;
+        });
     private volatile boolean scanCompleted = false;
     private volatile boolean wsConnected   = false;
 
@@ -347,6 +356,7 @@ public class ScannerController implements Initializable {
                         this::onScanComplete,
                         this::onScanError);
                     wsConnected = true;
+                    startPollFallback(currentScanId);
                     refreshScans();
                 });
             } catch (Exception e) {
@@ -388,6 +398,7 @@ public class ScannerController implements Initializable {
     }
 
     private void resetScanUI() {
+        stopPollFallback();
         btnStartScan.setDisable(false);
         btnStopScan.setDisable(true);
         progressSection.setVisible(false);
@@ -550,6 +561,52 @@ public class ScannerController implements Initializable {
 
     private Stage getStage() {
         return (Stage) txtFolderPath.getScene().getWindow();
+    }
+
+    // ── Poll fallback (HTTP polling when WS is unavailable or slow) ──────────
+    /**
+     * Fallback HTTP polling cuando el WebSocket no entrega actualizaciones.
+     * Garantiza que el usuario siempre vea progreso, incluso si el WS falla.
+     */
+    private void startPollFallback(String scanId) {
+        stopPollFallback();
+        pollFallback = POLL_EXECUTOR.scheduleAtFixedRate(() -> {
+            if (!isScanning || scanCompleted) {
+                stopPollFallback();
+                return;
+            }
+            try {
+                var progress = apiClient.getScanProgress(scanId);
+                if (progress == null) return;
+                String status = progress.getStatus();
+                Platform.runLater(() -> {
+                    if (!isScanning) return;
+                    double pct = progress.getProgress();
+                    int files  = progress.getFilesFound();
+                    progressBar.setProgress(pct / 100.0);
+                    lblProgress.setText(String.format("%.0f%%", pct));
+                    lblFilesFound.setText(String.format("%,d archivos encontrados", files));
+                    if (!progress.getMessage().isEmpty())
+                        lblCurrentDir.setText(progress.getMessage());
+                });
+                if ("completed".equals(status)) {
+                    stopPollFallback();
+                    Platform.runLater(this::onScanComplete);
+                } else if ("failed".equals(status)) {
+                    stopPollFallback();
+                    Platform.runLater(() -> onScanError(progress.getMessage()));
+                }
+            } catch (Exception e) {
+                System.err.println("[PollFallback] error: " + e.getMessage());
+            }
+        }, 500, 800, TimeUnit.MILLISECONDS);
+    }
+
+    private void stopPollFallback() {
+        if (pollFallback != null && !pollFallback.isDone()) {
+            pollFallback.cancel(false);
+            pollFallback = null;
+        }
     }
 
     // =========================================================================

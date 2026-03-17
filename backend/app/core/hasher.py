@@ -132,12 +132,14 @@ def find_duplicates(
 
     # ── Fase 2: hash parcial (primeros 4KB) ───────────────────────────────
     flat = [f for group in candidates for f in group]
+    # path_to_file: mapeo rápido path → FileInfo para reconstruir después del hash
+    path_to_file = {f.path: f for f in flat}
     partial_hashes = _compute_hashes_parallel(flat, partial=True)
 
     by_partial: dict[str, list[FileInfo]] = defaultdict(list)
-    for file_info, ph in partial_hashes.items():
-        if ph:
-            by_partial[ph].append(file_info)
+    for file_path, ph in partial_hashes.items():
+        if ph and file_path in path_to_file:
+            by_partial[ph].append(path_to_file[file_path])
 
     candidates2 = [g for g in by_partial.values() if len(g) >= 2]
 
@@ -146,15 +148,19 @@ def find_duplicates(
 
     # ── Fase 3: hash completo SHA-256 ─────────────────────────────────────
     flat2 = [f for group in candidates2 for f in group]
+    path_to_file2 = {f.path: f for f in flat2}
     full_hashes = _compute_hashes_parallel(flat2, partial=False, callback=progress_callback)
 
-    for file_info, fh in full_hashes.items():
-        file_info.hash = fh
-
     by_full: dict[str, list[FileInfo]] = defaultdict(list)
-    for file_info, fh in full_hashes.items():
-        if fh:
-            by_full[fh].append(file_info)
+    for file_path, fh in full_hashes.items():
+        if fh and file_path in path_to_file2:
+            fi = path_to_file2[file_path]
+            # Guardar el hash en el objeto (necesario para _build_group)
+            try:
+                fi.hash = fh
+            except Exception:
+                pass  # Si el modelo es frozen, ignorar
+            by_full[fh].append(fi)
 
     groups = [
         _build_group(hash_val, group_files)
@@ -170,26 +176,28 @@ def _compute_hashes_parallel(
     partial: bool,
     callback: Optional[Callable[[int, int], None]] = None,
     max_workers: int = min(multiprocessing.cpu_count() * 2, 8),
-) -> dict[FileInfo, Optional[str]]:
+) -> dict[str, Optional[str]]:
+    """Retorna dict[path, hash] para evitar usar FileInfo como key de dict
+    (Python 3.14 + Pydantic v2: los modelos no son hasheables por defecto)."""
 
-    results: dict[FileInfo, Optional[str]] = {}
+    results: dict[str, Optional[str]] = {}
     completed = 0
     total     = len(files)
     hash_func = _partial_hash if partial else _full_hash
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_file = {
-            executor.submit(hash_func, f.path): f
+        future_to_path = {
+            executor.submit(hash_func, f.path): f.path
             for f in files
         }
 
-        for future in as_completed(future_to_file):
-            file_info = future_to_file[future]
+        for future in as_completed(future_to_path):
+            file_path = future_to_path[future]
             try:
-                results[file_info] = future.result()
+                results[file_path] = future.result()
             except Exception as e:
-                logger.warning("Error hasheando %s: %s", file_info.path, e)
-                results[file_info] = None
+                logger.warning("Error hasheando %s: %s", file_path, e)
+                results[file_path] = None
 
             completed += 1
             if callback and completed % 10 == 0:

@@ -58,7 +58,8 @@ public class WebSocketManager {
         Consumer<String> onError
     ) {
         this.client     = client;
-        this.wsUrl      = "ws://localhost:8000/api/scan/ws/scan/" + scanId;
+        // Usar 127.0.0.1 en vez de localhost para evitar problemas con IPv6 en Windows 11
+        this.wsUrl      = "ws://127.0.0.1:8000/api/scan/ws/scan/" + scanId;
         this.onMessage  = onMessage;
         this.onComplete = onComplete;
         this.onError    = onError;

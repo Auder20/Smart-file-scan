@@ -56,11 +56,14 @@ def validate_scan_path(path: str) -> dict:
 @router.post("", status_code=202)
 def start_scan(request: ScanRequest) -> dict:
     scan_id = str(uuid.uuid4())[:8]
+    logger.info(f"[SCAN START] scan_id={scan_id} path={request.path!r}")
     scan_store.set_scan_progress(scan_id, ScanProgress(
         scan_id=scan_id, status=ScanStatus.PENDING,
         progress=0, files_found=0, message="Iniciando escaneo...",
     ))
-    Thread(target=_run_scan, args=(scan_id, request), daemon=True).start()
+    t = Thread(target=_run_scan, args=(scan_id, request), daemon=True)
+    t.start()
+    logger.info(f"[THREAD LAUNCHED] scan_id={scan_id} alive={t.is_alive()}")
     return {"scan_id": scan_id, "status": "accepted"}
 
 
@@ -90,6 +93,7 @@ def get_progress(scan_id: str) -> ScanProgress:
 async def scan_progress_ws(websocket: WebSocket, scan_id: str):
     await websocket.accept()
     _active_connections.append(websocket)
+    logger.info(f"[WS CONNECT] scan_id={scan_id} total_connections={len(_active_connections)}")
     try:
         while True:
             progress = scan_store.get_scan_progress(scan_id)
@@ -190,18 +194,33 @@ def delete_scan(scan_id: str) -> dict:
 def _run_scan(scan_id: str, request: ScanRequest) -> None:
     import time
 
-    cancel_event = Event()
-    _scan_cancel_events[scan_id] = cancel_event
+    try:
+        cancel_event = Event()
+        _scan_cancel_events[scan_id] = cancel_event
 
-    progress = scan_store.get_scan_progress(scan_id)
-    if not progress:
-        logger.error(f"Scan {scan_id} not found in progress store")
+        progress = scan_store.get_scan_progress(scan_id)
+        if not progress:
+            logger.error(f"[SCAN ABORT] scan_id={scan_id} not found in progress store")
+            return
+
+        # Reemplazar objeto para evitar problemas de mutación con Pydantic v2
+        new_progress = ScanProgress(
+            scan_id=scan_id, status=ScanStatus.RUNNING,
+            progress=0, files_found=0, message="Escaneando...",
+        )
+        scan_store.set_scan_progress(scan_id, new_progress)
+        progress = new_progress
+
+        files: list[FileInfo] = []
+        start = time.time()
+        logger.info(f"[SCAN RUNNING] scan_id={scan_id} path={request.path!r}")
+
+    except Exception as e:
+        logger.error(f"[SCAN INIT ERROR] scan_id={scan_id} {type(e).__name__}: {e}", exc_info=True)
+        _notify_ws({"type": "error", "scan_id": scan_id,
+                    "message": f"Error iniciando scan: {e}",
+                    "timestamp": datetime.now().isoformat()})
         return
-
-    progress.status = ScanStatus.RUNNING
-    progress.message = "Escaneando..."
-    files: list[FileInfo] = []
-    start = time.time()
 
     try:
         save_scan_metadata(scan_id, request.path, ScanStatus.RUNNING.value)
@@ -215,8 +234,11 @@ def _run_scan(scan_id: str, request: ScanRequest) -> None:
         for event in scan_directory(request):
             if cancel_event.is_set():
                 logger.info(f"Scan {scan_id} cancelled")
-                progress.status = ScanStatus.FAILED
-                progress.message = "Escaneo cancelado por el usuario"
+                scan_store.set_scan_progress(scan_id, ScanProgress(
+                    scan_id=scan_id, status=ScanStatus.FAILED,
+                    progress=0, files_found=len(files),
+                    message="Escaneo cancelado por el usuario",
+                ))
                 try:
                     save_scan_metadata(scan_id, request.path, ScanStatus.FAILED.value)
                 except Exception:
@@ -237,9 +259,13 @@ def _run_scan(scan_id: str, request: ScanRequest) -> None:
             elif isinstance(event, dict):
                 etype = event.get("type")
                 if etype in ("error", "timeout"):
-                    logger.error(f"Scan {scan_id} ended with {etype}: {event.get('message', '')}")
-                    progress.status = ScanStatus.FAILED
-                    progress.message = event.get("message", f"Escaneo falló ({etype})")
+                    err_msg = event.get("message", f"Escaneo falló ({etype})")
+                    logger.error(f"Scan {scan_id} ended with {etype}: {err_msg}")
+                    scan_store.set_scan_progress(scan_id, ScanProgress(
+                        scan_id=scan_id, status=ScanStatus.FAILED,
+                        progress=0, files_found=len(files), message=err_msg,
+                    ))
+                    progress = scan_store.get_scan_progress(scan_id)
                     try:
                         save_scan_metadata(scan_id, request.path, ScanStatus.FAILED.value)
                     except Exception:
@@ -249,10 +275,14 @@ def _run_scan(scan_id: str, request: ScanRequest) -> None:
                     return
                 elif etype == "progress":
                     count = event.get("count", len(files))
-                    progress.files_found = count
-                    progress.message = f"Escaneando… {count:,} archivos encontrados"
-                    if estimated > 0:
-                        progress.progress = min(int(count * 100 / estimated), 99)
+                    pct = min(int(count * 100 / estimated), 99) if estimated > 0 else 0
+                    msg = f"Escaneando… {count:,} archivos encontrados"
+                    # Reemplazar objeto completo (compatible con Pydantic v2 frozen)
+                    scan_store.set_scan_progress(scan_id, ScanProgress(
+                        scan_id=scan_id, status=ScanStatus.RUNNING,
+                        progress=pct, files_found=count, message=msg,
+                    ))
+                    progress = scan_store.get_scan_progress(scan_id)
 
                     _notify_ws({
                         "type": "progress", "scan_id": scan_id,
@@ -292,9 +322,13 @@ def _run_scan(scan_id: str, request: ScanRequest) -> None:
             files_truncated=len(files) > 1000,
         ))
 
-        progress.status = ScanStatus.COMPLETED
-        progress.progress = 100
-        progress.message = f"Completado: {len(files):,} archivos en {duration}s"
+        scan_store.set_scan_progress(scan_id, ScanProgress(
+            scan_id=scan_id, status=ScanStatus.COMPLETED,
+            progress=100, files_found=len(files),
+            message=f"Completado: {len(files):,} archivos en {duration}s",
+        ))
+        progress = scan_store.get_scan_progress(scan_id)
+        logger.info(f"[SCAN DONE] scan_id={scan_id} files={len(files)} duration={duration}s")
 
         _notify_ws({
             "type": "completed", "scan_id": scan_id, "progress": 100,
@@ -303,9 +337,13 @@ def _run_scan(scan_id: str, request: ScanRequest) -> None:
         })
 
     except Exception as e:
-        logger.error(f"Error en scan {scan_id}: {e}", exc_info=True)
-        progress.status = ScanStatus.FAILED
-        progress.message = str(e)
+        logger.error(f"[SCAN ERROR] scan_id={scan_id} error={type(e).__name__}: {e}", exc_info=True)
+        scan_store.set_scan_progress(scan_id, ScanProgress(
+            scan_id=scan_id, status=ScanStatus.FAILED,
+            progress=0, files_found=len(files) if 'files' in dir() else 0,
+            message=f"{type(e).__name__}: {e}",
+        ))
+        progress = scan_store.get_scan_progress(scan_id)
         try:
             save_scan_metadata(scan_id, request.path, ScanStatus.FAILED.value)
         except Exception:
@@ -331,4 +369,4 @@ def _estimate_file_count(path: str) -> int:
                 return count
     except Exception:
         pass
-    return count    
+    return count

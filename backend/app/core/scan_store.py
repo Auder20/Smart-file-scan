@@ -7,7 +7,7 @@ eliminating direct coupling between routers through global variables.
 
 import logging
 from typing import Dict, Optional
-from threading import Lock
+from threading import Lock, RLock
 from datetime import datetime
 
 from app.models.file_info import ScanResult, ScanProgress, ScanStatus
@@ -35,7 +35,7 @@ class ScanStore:
         
         self._scan_results: Dict[str, ScanResult] = {}
         self._scan_progress: Dict[str, ScanProgress] = {}
-        self._rlock = Lock()  # Add reentrant lock for thread safety
+        self._rlock = RLock()  # RLock permite que el mismo hilo adquiera el lock varias veces
         self._initialized = True
         logger.debug("ScanStore singleton initialized")
     
@@ -103,8 +103,10 @@ class ScanStore:
     def get_scan_info(self, scan_id: str) -> Optional[Dict]:
         """Get combined scan information"""
         with self._rlock:
-            progress = self.get_scan_progress(scan_id)
-            result = self.get_scan_result(scan_id)
+            # Acceder directamente a los dicts internos (no llamar a métodos
+            # que también adquieren el lock — causaría deadlock con Lock normal)
+            progress = self._scan_progress.get(scan_id)
+            result = self._scan_results.get(scan_id)
         
         if not progress and not result:
             return None
