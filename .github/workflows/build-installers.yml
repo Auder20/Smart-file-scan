@@ -1,16 +1,3 @@
-# ============================================================
-#  Smart File Organizer — GitHub Actions CI/CD
-#
-#  Genera los 3 instaladores en cada release:
-#    - Windows:  SmartFileOrganizer-X.X.X-setup.exe
-#    - macOS:    SmartFileOrganizer-X.X.X.dmg
-#    - Linux:    SmartFileOrganizer-X.X.X-x86_64.AppImage
-#
-#  Como usar:
-#    git tag v1.0.0
-#    git push origin v1.0.0
-# ============================================================
-
 name: Build Installers
 
 on:
@@ -30,13 +17,9 @@ env:
 
 jobs:
 
-  # ──────────────────────────────────────────────────────────
-  #  Windows — genera .exe con Inno Setup
-  # ──────────────────────────────────────────────────────────
   build-windows:
     name: Windows (.exe)
     runs-on: windows-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -48,7 +31,7 @@ jobs:
           java-version: '21'
           cache: maven
 
-      - name: Configurar Python
+      - name: Configurar Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -105,89 +88,21 @@ jobs:
             --main-jar frontend-1.0.0.jar `
             --main-class "${{ env.MAIN_CLASS }}" `
             --java-options "--enable-preview" `
-            --java-options "-Xmx512m" `
-            --java-options "--add-opens=javafx.graphics/com.sun.javafx.application=ALL-UNNAMED"
+            --java-options "-Xmx512m"
         shell: pwsh
 
       - name: Crear launcher
         run: |
           $appDir = "dist/win/frontend/${{ env.APP_NAME }}"
-          New-Item -ItemType Directory -Force "$appDir/backend" | Out-Null
-          Copy-Item "dist/win/backend/sfo-backend.exe" "$appDir/backend/"
-
-          # launcher.bat
-          @'
-          @echo off
-          set DIR=%~dp0
-          set DATA_DIR=%APPDATA%\SmartFileOrganizer
-          if not exist "%DATA_DIR%" mkdir "%DATA_DIR%"
-          start "" /B "%DIR%backend\sfo-backend.exe"
-          set /a tries=0
-          :wait
-          timeout /t 1 /nobreak >nul
-          curl -sf http://127.0.0.1:8000/api/health >nul 2>&1
-          if %errorlevel%==0 goto :ready
-          set /a tries+=1
-          if %tries% lss 15 goto :wait
-          :ready
-          start "" "%DIR%SmartFileOrganizer.exe"
-          '@ | Out-File -FilePath "$appDir/launcher.bat" -Encoding ASCII
-
-          # VBS sin ventana de consola
-          @'
-          Set WShell = CreateObject("WScript.Shell")
-          WShell.Run Chr(34) & WScript.ScriptFullName & "\..\launcher.bat" & Chr(34), 0, False
-          '@ | Out-File -FilePath "$appDir/SmartFileOrganizerLauncher.vbs" -Encoding ASCII
+          Copy-Item "dist/win/backend/sfo-backend.exe" "$appDir/backend/" -Force
+          & packaging/scripts/create_launcher.ps1 -AppDir $appDir
         shell: pwsh
 
-      - name: Generar y compilar instalador Inno Setup
+      - name: Generar instalador
         run: |
           $v    = "${{ steps.ver.outputs.version }}"
           $root = (Get-Location).Path
-          New-Item -ItemType Directory -Force dist/installer | Out-Null
-
-          $iss = @"
-          #define MyAppName    "${{ env.APP_NAME }}"
-          #define MyAppVersion "$v"
-          #define AppDir       "$root\dist\win\frontend\${{ env.APP_NAME }}"
-
-          [Setup]
-          AppId={{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}
-          AppName={#MyAppName}
-          AppVersion={#MyAppVersion}
-          AppPublisher=Smart File Organizer
-          DefaultDirName={autopf}\{#MyAppName}
-          DefaultGroupName={#MyAppName}
-          OutputDir=$root\dist\installer
-          OutputBaseFilename=${{ env.APP_NAME }}-$v-setup
-          Compression=lzma2/ultra64
-          SolidCompression=yes
-          WizardStyle=modern
-          PrivilegesRequired=lowest
-          ArchitecturesAllowed=x64
-          ArchitecturesInstallIn64BitMode=x64
-
-          [Languages]
-          Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"
-          Name: "english"; MessagesFile: "compiler:Default.isl"
-
-          [Tasks]
-          Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
-
-          [Files]
-          Source: "{#AppDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-
-          [Icons]
-          Name: "{group}\{#MyAppName}";             Filename: "{app}\SmartFileOrganizerLauncher.vbs"
-          Name: "{autodesktop}\{#MyAppName}";        Filename: "{app}\SmartFileOrganizerLauncher.vbs"; Tasks: desktopicon
-          Name: "{group}\Desinstalar {#MyAppName}";  Filename: "{uninstallexe}"
-
-          [Run]
-          Filename: "wscript.exe"; Parameters: """{app}\SmartFileOrganizerLauncher.vbs"""; Description: "Iniciar {#MyAppName}"; Flags: nowait postinstall skipifsilent
-          "@
-
-          $iss | Out-File -FilePath dist/installer/installer.iss -Encoding UTF8
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" dist\installer\installer.iss
+          & packaging/scripts/create_installer.ps1 -Version $v -Root $root -AppName "${{ env.APP_NAME }}"
         shell: pwsh
 
       - name: Subir artefacto
@@ -197,13 +112,9 @@ jobs:
           path: dist/installer/${{ env.APP_NAME }}-*-setup.exe
           retention-days: 7
 
-  # ──────────────────────────────────────────────────────────
-  #  macOS — genera .dmg
-  # ──────────────────────────────────────────────────────────
   build-macos:
     name: macOS (.dmg)
     runs-on: macos-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -215,7 +126,7 @@ jobs:
           java-version: '21'
           cache: maven
 
-      - name: Configurar Python
+      - name: Configurar Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -245,6 +156,7 @@ jobs:
             --hidden-import=uvicorn.protocols.websockets.auto \
             --hidden-import=uvicorn.lifespan.on \
             --hidden-import=anyio._backends._asyncio \
+            --hidden-import=anyio._backends._trio \
             --collect-all fastapi \
             --collect-all pydantic \
             --noconfirm \
@@ -271,32 +183,14 @@ jobs:
             --mac-package-identifier com.smartfileorganizer.app \
             --mac-package-name "Smart File Organizer"
 
-      - name: Crear launcher dentro del bundle
+      - name: Crear launcher
         run: |
           BUNDLE="dist/mac/frontend/${{ env.APP_NAME }}.app"
           mkdir -p "$BUNDLE/Contents/MacOS/backend"
           cp dist/mac/backend/sfo-backend "$BUNDLE/Contents/MacOS/backend/"
           chmod +x "$BUNDLE/Contents/MacOS/backend/sfo-backend"
-
-          mv "$BUNDLE/Contents/MacOS/${{ env.APP_NAME }}" \
-             "$BUNDLE/Contents/MacOS/${{ env.APP_NAME }}-ui"
-
-          cat > "$BUNDLE/Contents/MacOS/${{ env.APP_NAME }}" << 'LAUNCHER'
-          #!/bin/bash
-          DIR="$(cd "$(dirname "$0")" && pwd)"
-          DATA="$HOME/.smartfileorganizer"
-          mkdir -p "$DATA"
-          export DB_PATH="$DATA/sfo.db"
-          "$DIR/backend/sfo-backend" &
-          BPID=$!
-          for i in $(seq 1 20); do
-            curl -sf http://127.0.0.1:8000/api/health >/dev/null 2>&1 && break
-            sleep 0.5
-          done
-          "$DIR/${{ env.APP_NAME }}-ui"
-          kill "$BPID" 2>/dev/null
-          LAUNCHER
-          chmod +x "$BUNDLE/Contents/MacOS/${{ env.APP_NAME }}"
+          mv "$BUNDLE/Contents/MacOS/${{ env.APP_NAME }}" "$BUNDLE/Contents/MacOS/${{ env.APP_NAME }}-ui"
+          bash packaging/scripts/create_mac_launcher.sh "$BUNDLE" "${{ env.APP_NAME }}"
           xattr -cr "$BUNDLE" 2>/dev/null || true
 
       - name: Crear DMG
@@ -322,13 +216,9 @@ jobs:
           path: dist/installer/${{ env.APP_NAME }}-*.dmg
           retention-days: 7
 
-  # ──────────────────────────────────────────────────────────
-  #  Linux — genera .AppImage
-  # ──────────────────────────────────────────────────────────
   build-linux:
     name: Linux (.AppImage)
     runs-on: ubuntu-22.04
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -340,7 +230,7 @@ jobs:
           java-version: '21'
           cache: maven
 
-      - name: Configurar Python
+      - name: Configurar Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -380,6 +270,7 @@ jobs:
             --hidden-import=uvicorn.protocols.websockets.auto \
             --hidden-import=uvicorn.lifespan.on \
             --hidden-import=anyio._backends._asyncio \
+            --hidden-import=anyio._backends._trio \
             --collect-all fastapi \
             --collect-all pydantic \
             --noconfirm \
@@ -408,73 +299,13 @@ jobs:
         run: |
           APPDIR="dist/linux/AppDir"
           mkdir -p "$APPDIR/usr/share/icons/hicolor/256x256/apps"
-
           cp -r "dist/linux/frontend/${{ env.APP_NAME }}" "$APPDIR/frontend"
-
           mkdir -p "$APPDIR/backend"
           cp dist/linux/backend/sfo-backend "$APPDIR/backend/"
           chmod +x "$APPDIR/backend/sfo-backend"
-
-          # Icono generado con Python (sin dependencias externas)
-          python3 -c "
-import struct, zlib, base64
-
-def png_chunk(name, data):
-    c = zlib.crc32(name + data) & 0xffffffff
-    return struct.pack('>I', len(data)) + name + data + struct.pack('>I', c)
-
-w = h = 256
-raw = b''
-for y in range(h):
-    raw += b'\x00'
-    for x in range(w):
-        cx, cy = x - 128, y - 128
-        r = (cx*cx + cy*cy) ** 0.5
-        if r < 100:
-            raw += bytes([79, 142, 247, 255])
-        elif r < 110:
-            raw += bytes([30, 30, 50, 255])
-        else:
-            raw += bytes([17, 17, 20, 255])
-
-compressed = zlib.compress(raw, 9)
-ihdr = struct.pack('>IIBBBBB', w, h, 8, 2, 0, 0, 0)
-data = (b'\x89PNG\r\n\x1a\n' +
-        png_chunk(b'IHDR', ihdr) +
-        png_chunk(b'IDAT', compressed) +
-        png_chunk(b'IEND', b''))
-open('$APPDIR/usr/share/icons/hicolor/256x256/apps/smartfileorganizer.png', 'wb').write(data)
-print('Icono creado OK')
-"
-          # Tambien copiar a la raiz del AppDir (requerido por appimagetool)
-          cp "$APPDIR/usr/share/icons/hicolor/256x256/apps/smartfileorganizer.png"              "$APPDIR/smartfileorganizer.png"
-
-          cat > "$APPDIR/smartfileorganizer.desktop" << 'DESKTOP'
-          [Desktop Entry]
-          Name=Smart File Organizer
-          Comment=Organiza y analiza tus archivos
-          Exec=SmartFileOrganizer
-          Icon=smartfileorganizer
-          Type=Application
-          Categories=Utility;FileManager;
-          DESKTOP
-
-          cat > "$APPDIR/AppRun" << 'APPRUN'
-          #!/usr/bin/env bash
-          APPDIR="$(dirname "$(readlink -f "$0")")"
-          DATA="$HOME/.smartfileorganizer"
-          mkdir -p "$DATA"
-          export DB_PATH="$DATA/sfo.db"
-          "$APPDIR/backend/sfo-backend" &
-          BPID=$!
-          for i in $(seq 1 20); do
-            curl -sf http://127.0.0.1:8000/api/health >/dev/null 2>&1 && break
-            sleep 0.5
-          done
-          "$APPDIR/frontend/${{ env.APP_NAME }}/bin/${{ env.APP_NAME }}"
-          kill "$BPID" 2>/dev/null
-          APPRUN
-          chmod +x "$APPDIR/AppRun"
+          python3 packaging/scripts/gen_icon.py "$APPDIR/usr/share/icons/hicolor/256x256/apps/smartfileorganizer.png"
+          cp "$APPDIR/usr/share/icons/hicolor/256x256/apps/smartfileorganizer.png" "$APPDIR/smartfileorganizer.png"
+          bash packaging/scripts/create_appdir.sh "$APPDIR" "${{ env.APP_NAME }}"
 
       - name: Generar AppImage
         run: |
@@ -492,9 +323,6 @@ print('Icono creado OK')
           path: dist/installer/${{ env.APP_NAME }}-*-x86_64.AppImage
           retention-days: 7
 
-  # ──────────────────────────────────────────────────────────
-  #  Release — sube los 3 instaladores a GitHub Releases
-  # ──────────────────────────────────────────────────────────
   create-release:
     name: Crear Release
     needs: [build-windows, build-macos, build-linux]
@@ -502,7 +330,6 @@ print('Icono creado OK')
     if: startsWith(github.ref, 'refs/tags/')
     permissions:
       contents: write
-
     steps:
       - name: Descargar artefactos
         uses: actions/download-artifact@v4
@@ -517,15 +344,13 @@ print('Icono creado OK')
           body: |
             ## Smart File Organizer ${{ github.ref_name }}
 
-            ### Descargas
-
             | Sistema | Archivo | Notas |
             |---------|---------|-------|
             | Windows 10/11 | `SmartFileOrganizer-*-setup.exe` | Doble clic para instalar |
             | macOS 12+ | `SmartFileOrganizer-*.dmg` | Arrastra a Applications |
-            | Linux x86_64 | `SmartFileOrganizer-*-x86_64.AppImage` | `chmod +x` y ejecutar |
+            | Linux x86_64 | `SmartFileOrganizer-*-x86_64.AppImage` | chmod +x y ejecutar |
 
-            > No requiere Java ni Python instalado — todo viene incluido.
+            > No requiere Java ni Python instalado.
           draft: false
           prerelease: false
           files: artifacts/*
