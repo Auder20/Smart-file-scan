@@ -21,8 +21,10 @@ start "" "%DIR%SmartFileOrganizer.exe"
 [System.IO.File]::WriteAllText("$AppDir\launcher.bat", $launcher)
 
 $vbs = @"
+Dim scriptDir
+scriptDir = Left(WScript.ScriptFullName, InStrRev(WScript.ScriptFullName, "\"))
 Set WShell = CreateObject("WScript.Shell")
-WShell.Run Chr(34) & WScript.ScriptFullName & "\..\launcher.bat" & Chr(34), 0, False
+WShell.Run Chr(34) & scriptDir & "launcher.bat" & Chr(34), 0, False
 "@
 [System.IO.File]::WriteAllText("$AppDir\SmartFileOrganizerLauncher.vbs", $vbs)
 Write-Host "Launcher creado OK"
