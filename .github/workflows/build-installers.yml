@@ -94,6 +94,7 @@ jobs:
       - name: Crear launcher
         run: |
           $appDir = "dist/win/frontend/${{ env.APP_NAME }}"
+          New-Item -ItemType Directory -Force "$appDir/backend" | Out-Null
           Copy-Item "dist/win/backend/sfo-backend.exe" "$appDir/backend/" -Force
           & packaging/scripts/create_launcher.ps1 -AppDir $appDir
         shell: pwsh
