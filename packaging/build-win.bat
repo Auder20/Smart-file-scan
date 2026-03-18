@@ -117,8 +117,13 @@ pyinstaller --onefile ^
     --hidden-import=uvicorn.lifespan.on ^
     --hidden-import=anyio._backends._asyncio ^
     --hidden-import=anyio._backends._trio ^
+    --hidden-import=multiprocessing ^
+    --hidden-import=sqlite3 ^
     --collect-all fastapi ^
     --collect-all pydantic ^
+    --collect-all uvicorn ^
+    --collect-all starlette ^
+    --collect-all sqlalchemy ^
     --noconfirm ^
     main.py
 
@@ -179,11 +184,9 @@ echo [OK] Frontend empaquetado: %FRONTEND_DIST%\%APP_NAME%
 echo.
 echo [STEP 6/8] Creando launcher...
 
-:: Copiar backend dentro de la carpeta del frontend
 mkdir "%FRONTEND_DIST%\%APP_NAME%\backend"
 copy "%BACKEND_DIST%\sfo-backend.exe" "%FRONTEND_DIST%\%APP_NAME%\backend\sfo-backend.exe" >nul
 
-:: Crear launcher.bat que arranca el backend y luego la UI
 set LAUNCHER=%FRONTEND_DIST%\%APP_NAME%\launcher.bat
 (
 echo @echo off
@@ -191,23 +194,26 @@ echo set DIR=%%~dp0
 echo set DATA_DIR=%%APPDATA%%\SmartFileOrganizer
 echo if not exist "%%DATA_DIR%%" mkdir "%%DATA_DIR%%"
 echo start "" /B "%%DIR%%backend\sfo-backend.exe"
-echo :: Esperar a que el backend responda (max 10s)
 echo set /a tries=0
 echo :wait
 echo timeout /t 1 /nobreak >nul
 echo curl -sf http://127.0.0.1:8000/api/health >nul 2>&1
 echo if %%errorlevel%%==0 goto :ready
 echo set /a tries+=1
-echo if %%tries%% lss 10 goto :wait
+echo if %%tries%% lss 15 goto :wait
 echo :ready
 echo start "" "%%DIR%%%APP_NAME%.exe"
 ) > "%LAUNCHER%"
 
-:: Crear VBS wrapper para lanzar sin ventana de consola negra
+:: FIX: usar Left+InStrRev para extraer correctamente la carpeta del script
+:: WScript.ScriptFullName devuelve la ruta completa del .vbs, no su directorio.
+:: La concatenacion directa con "\..\launcher.bat" producía rutas inválidas.
 set VBS_LAUNCHER=%FRONTEND_DIST%\%APP_NAME%\SmartFileOrganizerLauncher.vbs
 (
+echo Dim scriptDir
+echo scriptDir = Left(WScript.ScriptFullName, InStrRev(WScript.ScriptFullName, "\"))
 echo Set WShell = CreateObject("WScript.Shell"^)
-echo WShell.Run Chr(34^) ^& WScript.ScriptFullName ^& "\..\launcher.bat" ^& Chr(34^), 0, False
+echo WShell.Run Chr(34^) ^& scriptDir ^& "launcher.bat" ^& Chr(34^), 0, False
 ) > "%VBS_LAUNCHER%"
 
 echo [OK] Launcher creado

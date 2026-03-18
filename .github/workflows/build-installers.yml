@@ -59,14 +59,24 @@ jobs:
             --name sfo-backend `
             --distpath "../dist/win/backend" `
             --hidden-import=uvicorn.logging `
+            --hidden-import=uvicorn.loops `
             --hidden-import=uvicorn.loops.auto `
+            --hidden-import=uvicorn.protocols `
+            --hidden-import=uvicorn.protocols.http `
             --hidden-import=uvicorn.protocols.http.auto `
+            --hidden-import=uvicorn.protocols.websockets `
             --hidden-import=uvicorn.protocols.websockets.auto `
+            --hidden-import=uvicorn.lifespan `
             --hidden-import=uvicorn.lifespan.on `
             --hidden-import=anyio._backends._asyncio `
             --hidden-import=anyio._backends._trio `
+            --hidden-import=multiprocessing `
+            --hidden-import=sqlite3 `
             --collect-all fastapi `
             --collect-all pydantic `
+            --collect-all uvicorn `
+            --collect-all starlette `
+            --collect-all sqlalchemy `
             --noconfirm `
             main.py
         shell: pwsh
@@ -88,7 +98,8 @@ jobs:
             --main-jar frontend-1.0.0.jar `
             --main-class "${{ env.MAIN_CLASS }}" `
             --java-options "--enable-preview" `
-            --java-options "-Xmx512m"
+            --java-options "-Xmx512m" `
+            --java-options "--add-opens=javafx.graphics/com.sun.javafx.application=ALL-UNNAMED"
         shell: pwsh
 
       - name: Crear launcher
@@ -152,14 +163,24 @@ jobs:
             --name sfo-backend \
             --distpath "../dist/mac/backend" \
             --hidden-import=uvicorn.logging \
+            --hidden-import=uvicorn.loops \
             --hidden-import=uvicorn.loops.auto \
+            --hidden-import=uvicorn.protocols \
+            --hidden-import=uvicorn.protocols.http \
             --hidden-import=uvicorn.protocols.http.auto \
+            --hidden-import=uvicorn.protocols.websockets \
             --hidden-import=uvicorn.protocols.websockets.auto \
+            --hidden-import=uvicorn.lifespan \
             --hidden-import=uvicorn.lifespan.on \
             --hidden-import=anyio._backends._asyncio \
             --hidden-import=anyio._backends._trio \
+            --hidden-import=multiprocessing \
+            --hidden-import=sqlite3 \
             --collect-all fastapi \
             --collect-all pydantic \
+            --collect-all uvicorn \
+            --collect-all starlette \
+            --collect-all sqlalchemy \
             --noconfirm \
             main.py
 
@@ -181,6 +202,7 @@ jobs:
             --main-class "${{ env.MAIN_CLASS }}" \
             --java-options "--enable-preview" \
             --java-options "-Xmx512m" \
+            --java-options "--add-opens=javafx.graphics/com.sun.javafx.application=ALL-UNNAMED" \
             --mac-package-identifier com.smartfileorganizer.app \
             --mac-package-name "Smart File Organizer"
 
@@ -266,14 +288,24 @@ jobs:
             --name sfo-backend \
             --distpath "../dist/linux/backend" \
             --hidden-import=uvicorn.logging \
+            --hidden-import=uvicorn.loops \
             --hidden-import=uvicorn.loops.auto \
+            --hidden-import=uvicorn.protocols \
+            --hidden-import=uvicorn.protocols.http \
             --hidden-import=uvicorn.protocols.http.auto \
+            --hidden-import=uvicorn.protocols.websockets \
             --hidden-import=uvicorn.protocols.websockets.auto \
+            --hidden-import=uvicorn.lifespan \
             --hidden-import=uvicorn.lifespan.on \
             --hidden-import=anyio._backends._asyncio \
             --hidden-import=anyio._backends._trio \
+            --hidden-import=multiprocessing \
+            --hidden-import=sqlite3 \
             --collect-all fastapi \
             --collect-all pydantic \
+            --collect-all uvicorn \
+            --collect-all starlette \
+            --collect-all sqlalchemy \
             --noconfirm \
             main.py
 
@@ -294,7 +326,8 @@ jobs:
             --main-jar frontend-1.0.0.jar \
             --main-class "${{ env.MAIN_CLASS }}" \
             --java-options "--enable-preview" \
-            --java-options "-Xmx512m"
+            --java-options "-Xmx512m" \
+            --java-options "--add-opens=javafx.graphics/com.sun.javafx.application=ALL-UNNAMED"
 
       - name: Construir AppDir
         run: |
