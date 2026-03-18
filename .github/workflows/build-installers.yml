@@ -415,12 +415,39 @@ jobs:
           cp dist/linux/backend/sfo-backend "$APPDIR/backend/"
           chmod +x "$APPDIR/backend/sfo-backend"
 
-          # Icono (reemplaza con tu PNG 256x256)
-          convert -size 256x256 xc:#111114 \
-            -fill '#4F8EF7' -draw "roundrectangle 40,40 216,216 20,20" \
-            "$APPDIR/usr/share/icons/hicolor/256x256/apps/smartfileorganizer.png" 2>/dev/null || \
-          cp /usr/share/icons/hicolor/48x48/apps/xterm.png \
-             "$APPDIR/usr/share/icons/hicolor/256x256/apps/smartfileorganizer.png" 2>/dev/null || true
+          # Icono generado con Python (sin dependencias externas)
+          python3 -c "
+import struct, zlib, base64
+
+def png_chunk(name, data):
+    c = zlib.crc32(name + data) & 0xffffffff
+    return struct.pack('>I', len(data)) + name + data + struct.pack('>I', c)
+
+w = h = 256
+raw = b''
+for y in range(h):
+    raw += b'\x00'
+    for x in range(w):
+        cx, cy = x - 128, y - 128
+        r = (cx*cx + cy*cy) ** 0.5
+        if r < 100:
+            raw += bytes([79, 142, 247, 255])
+        elif r < 110:
+            raw += bytes([30, 30, 50, 255])
+        else:
+            raw += bytes([17, 17, 20, 255])
+
+compressed = zlib.compress(raw, 9)
+ihdr = struct.pack('>IIBBBBB', w, h, 8, 2, 0, 0, 0)
+data = (b'\x89PNG\r\n\x1a\n' +
+        png_chunk(b'IHDR', ihdr) +
+        png_chunk(b'IDAT', compressed) +
+        png_chunk(b'IEND', b''))
+open('$APPDIR/usr/share/icons/hicolor/256x256/apps/smartfileorganizer.png', 'wb').write(data)
+print('Icono creado OK')
+"
+          # Tambien copiar a la raiz del AppDir (requerido por appimagetool)
+          cp "$APPDIR/usr/share/icons/hicolor/256x256/apps/smartfileorganizer.png"              "$APPDIR/smartfileorganizer.png"
 
           cat > "$APPDIR/smartfileorganizer.desktop" << 'DESKTOP'
           [Desktop Entry]

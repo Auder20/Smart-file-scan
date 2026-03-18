@@ -22,17 +22,31 @@ logger = logging.getLogger(__name__)
 #   3. /tmp/smart_file_organizer.db  (siempre escribible en cualquier contenedor)
 
 def _resolve_db_path() -> str:
+    # 1. Variable de entorno (maxima prioridad)
     env_path = os.getenv("DB_PATH")
     if env_path:
+        os.makedirs(os.path.dirname(env_path), exist_ok=True)
         return env_path
 
+    import sys
+
+    # 2. Windows: usar %APPDATA%\SmartFileOrganizer
+    if sys.platform == "win32":
+        appdata = os.getenv("APPDATA") or os.path.expanduser("~")
+        data_dir = os.path.join(appdata, "SmartFileOrganizer")
+        os.makedirs(data_dir, exist_ok=True)
+        return os.path.join(data_dir, "smart_file_organizer.db")
+
+    # 3. Linux/Mac empaquetado o Docker
     candidates = [
+        os.path.join(os.path.expanduser("~"), ".smartfileorganizer", "smart_file_organizer.db"),
         "/app/smart_file_organizer.db",
         "/tmp/smart_file_organizer.db",
     ]
     for path in candidates:
         directory = os.path.dirname(path) or "."
         try:
+            os.makedirs(directory, exist_ok=True)
             test = path + ".write_test"
             with open(test, "w") as f:
                 f.write("x")
@@ -41,7 +55,7 @@ def _resolve_db_path() -> str:
         except OSError:
             continue
 
-    # Último recurso: directorio actual
+    # Ultimo recurso: directorio actual
     return "smart_file_organizer.db"
 
 
