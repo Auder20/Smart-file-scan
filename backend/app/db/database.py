@@ -62,6 +62,22 @@ def _resolve_db_path() -> str:
 DB_PATH = _resolve_db_path()
 
 
+# ── Database Initialization with Migrations ─────────────────────────────────────
+def initialize_database() -> None:
+    """
+    Initialize database with migrations.
+    This should be called once during application startup.
+    """
+    try:
+        from .migration_runner import get_migration_runner
+        runner = get_migration_runner(DB_PATH)
+        runner.initialize_database()
+        logger.info("Database initialized successfully")
+    except Exception as e:
+        logger.error(f"Database initialization failed: {e}")
+        raise
+
+
 # ── Pool de conexiones thread-local ───────────────────────────────────────────
 _thread_local = threading.local()
 

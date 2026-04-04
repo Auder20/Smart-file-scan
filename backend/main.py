@@ -27,6 +27,15 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     logger.info("Backend iniciado — LOG_LEVEL=%s", _log_level)
     logger.info("Documentación en http://localhost:8000/docs")
+    
+    # Initialize database with migrations
+    try:
+        from app.db.database import initialize_database
+        initialize_database()
+        logger.info("Database initialized with migrations")
+    except Exception as e:
+        logger.error(f"Database initialization failed: {e}")
+        raise
 
     # Pasar el event loop al módulo de scanner para notificaciones WebSocket
     import app.api.routes_scanner as scanner_mod

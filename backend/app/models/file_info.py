@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import os
-
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, validator as field_validator
 from typing import Optional
 from datetime import datetime
 from enum import Enum
@@ -29,7 +28,7 @@ class FileInfo(BaseModel):
     created:   datetime
     hash:      Optional[str] = None
 
-    @field_validator("extension", mode="before")
+    @field_validator("extension", pre=True)
     @classmethod
     def normalize_extension(cls, v: str) -> str:
         return v.lower().lstrip(".")

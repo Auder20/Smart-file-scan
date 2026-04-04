@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 import logging
 from datetime import datetime
-from threading import Thread, Event
+from threading import Thread, Event, Lock
 import asyncio
 import json
 
@@ -28,19 +28,26 @@ router = APIRouter(prefix="/api/scan", tags=["scanner"])
 _active_connections: list[WebSocket] = []
 _event_loop: asyncio.AbstractEventLoop = None
 _scan_cancel_events: dict[str, Event] = {}
+_connections_lock = Lock()
 
 
 def _notify_ws(data: dict) -> None:
     if not _event_loop:
         return
     message = json.dumps(data)
-    for ws in _active_connections[:]:
+    
+    # Thread-safe access to _active_connections
+    with _connections_lock:
+        connections_copy = _active_connections[:]
+    
+    for ws in connections_copy:
         try:
             asyncio.run_coroutine_threadsafe(ws.send_text(message), _event_loop)
         except Exception as e:
             logger.debug(f"WS send failed, removing dead connection: {e}")
-            if ws in _active_connections:
-                _active_connections.remove(ws)
+            with _connections_lock:
+                if ws in _active_connections:
+                    _active_connections.remove(ws)
 
 
 @router.get("/validate-path")
@@ -92,7 +99,11 @@ def get_progress(scan_id: str) -> ScanProgress:
 @router.websocket("/ws/scan/{scan_id}")
 async def scan_progress_ws(websocket: WebSocket, scan_id: str):
     await websocket.accept()
-    _active_connections.append(websocket)
+    
+    # Thread-safe connection addition
+    with _connections_lock:
+        _active_connections.append(websocket)
+    
     logger.info(f"[WS CONNECT] scan_id={scan_id} total_connections={len(_active_connections)}")
     try:
         while True:
@@ -125,8 +136,10 @@ async def scan_progress_ws(websocket: WebSocket, scan_id: str):
     except Exception as e:
         logger.error(f"WebSocket error for scan {scan_id}: {e}")
     finally:
-        if websocket in _active_connections:
-            _active_connections.remove(websocket)
+        # Thread-safe connection removal
+        with _connections_lock:
+            if websocket in _active_connections:
+                _active_connections.remove(websocket)
 
 
 @router.get("/{scan_id}/files")
